@@ -10,7 +10,7 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // =======================
-// CORS (CLOUDFLARE SAFE)
+// CORS
 // =======================
 app.use(cors({
   origin: "https://alphaapkstore.pages.dev",
@@ -21,7 +21,7 @@ app.options("*", cors());
 app.use(express.json());
 
 // =======================
-// CLOUDINARY CONFIG
+// CLOUDINARY
 // =======================
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -30,26 +30,25 @@ cloudinary.config({
 });
 
 // =======================
-// STORAGE DEFINITIONS
+// STORAGE
 // =======================
-const apkStorage = new CloudinaryStorage({
+const storage = new CloudinaryStorage({
   cloudinary,
-  params: {
-    folder: "alpha-apk-store/apks",
-    resource_type: "raw",
+  params: (req, file) => {
+    if (file.fieldname === "apk") {
+      return {
+        folder: "alpha-apk-store/apks",
+        resource_type: "raw",
+      };
+    }
+    return {
+      folder: "alpha-apk-store/images",
+      resource_type: "image",
+    };
   },
 });
 
-const imageStorage = new CloudinaryStorage({
-  cloudinary,
-  params: {
-    folder: "alpha-apk-store/images",
-    resource_type: "image",
-  },
-});
-
-const uploadApk = multer({ storage: apkStorage });
-const uploadImage = multer({ storage: imageStorage });
+const upload = multer({ storage });
 
 // =======================
 // DATA FILE
@@ -78,21 +77,23 @@ app.get("/api/apks", (req, res) => {
 });
 
 // =======================
-// UPLOAD APK (SAFE)
+// UPLOAD APK + IMAGE (FINAL FIX)
 // =======================
 app.post(
   "/api/upload",
-  uploadApk.single("apk"),
-  uploadImage.single("image"),
+  upload.fields([
+    { name: "apk", maxCount: 1 },
+    { name: "image", maxCount: 1 },
+  ]),
   (req, res) => {
     try {
       const { name, description, category } = req.body;
 
-      if (!req.file || !req.files) {
+      if (!req.files || !req.files.apk || !req.files.image) {
         return res.status(400).json({ message: "Files missing" });
       }
 
-      const apkUrl = req.file.path;
+      const apkUrl = req.files.apk[0].path;
       const imageUrl = req.files.image[0].path;
 
       const data = JSON.parse(fs.readFileSync(dataFile));
@@ -118,10 +119,11 @@ app.post(
 );
 
 // =======================
-// START SERVER
+// START
 // =======================
 app.listen(PORT, () => {
   console.log("Backend running on", PORT);
 });
+
 
 

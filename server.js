@@ -10,21 +10,15 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // =======================
-// MIDDLEWARE
+// CORS (CLOUDFLARE SAFE)
 // =======================
-app.use(express.json());
-
-// ✅ FIXED CORS FOR CLOUDFLARE + RENDER
 app.use(cors({
-  origin: [
-    "https://alphaapkstore.pages.dev",
-    "https://alphaapkstore.xyz"
-  ],
+  origin: "https://alphaapkstore.pages.dev",
   methods: ["GET", "POST", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type"],
-  credentials: true
 }));
 app.options("*", cors());
+
+app.use(express.json());
 
 // =======================
 // CLOUDINARY CONFIG
@@ -36,7 +30,7 @@ cloudinary.config({
 });
 
 // =======================
-// MULTER + CLOUDINARY STORAGE
+// STORAGE DEFINITIONS
 // =======================
 const apkStorage = new CloudinaryStorage({
   cloudinary,
@@ -54,18 +48,13 @@ const imageStorage = new CloudinaryStorage({
   },
 });
 
-const upload = multer({
-  storage: (req, file, cb) => {
-    if (file.fieldname === "apk") cb(null, apkStorage);
-    else cb(null, imageStorage);
-  },
-});
+const uploadApk = multer({ storage: apkStorage });
+const uploadImage = multer({ storage: imageStorage });
 
 // =======================
-// DATA FILE (METADATA)
+// DATA FILE
 // =======================
 const dataFile = path.join(__dirname, "apks.json");
-
 if (!fs.existsSync(dataFile)) {
   fs.writeFileSync(dataFile, JSON.stringify([]));
 }
@@ -74,17 +63,14 @@ if (!fs.existsSync(dataFile)) {
 // ADMIN AUTH
 // =======================
 app.post("/api/admin-auth", (req, res) => {
-  const { code } = req.body;
-
-  if (code === "GURJANTSANDHU") {
+  if (req.body.code === "GURJANTSANDHU") {
     return res.json({ success: true });
   }
-
-  res.status(401).json({ success: false, message: "Invalid code" });
+  res.status(401).json({ success: false });
 });
 
 // =======================
-// GET ALL APKS
+// GET APKS
 // =======================
 app.get("/api/apks", (req, res) => {
   const data = JSON.parse(fs.readFileSync(dataFile));
@@ -92,24 +78,22 @@ app.get("/api/apks", (req, res) => {
 });
 
 // =======================
-// UPLOAD APK + IMAGE
+// UPLOAD APK (SAFE)
 // =======================
 app.post(
   "/api/upload",
-  upload.fields([
-    { name: "apk", maxCount: 1 },
-    { name: "image", maxCount: 1 },
-  ]),
+  uploadApk.single("apk"),
+  uploadImage.single("image"),
   (req, res) => {
     try {
       const { name, description, category } = req.body;
 
-      if (!req.files || !req.files.apk || !req.files.image) {
-        return res.status(400).json({ message: "APK or image missing" });
+      if (!req.file || !req.files) {
+        return res.status(400).json({ message: "Files missing" });
       }
 
-      const apkFile = req.files.apk[0];
-      const imageFile = req.files.image[0];
+      const apkUrl = req.file.path;
+      const imageUrl = req.files.image[0].path;
 
       const data = JSON.parse(fs.readFileSync(dataFile));
 
@@ -118,46 +102,26 @@ app.post(
         name,
         description,
         category,
-        apkUrl: apkFile.path,       // Cloudinary URL
-        imageUrl: imageFile.path,   // Cloudinary URL
-        createdAt: new Date(),
+        apkUrl,
+        imageUrl,
       };
 
       data.push(newApk);
       fs.writeFileSync(dataFile, JSON.stringify(data, null, 2));
 
-      res.json({ success: true, apk: newApk });
+      res.json({ success: true });
     } catch (err) {
-      console.error(err);
+      console.error("UPLOAD ERROR:", err);
       res.status(500).json({ success: false });
     }
   }
 );
 
 // =======================
-// DELETE APK
-// =======================
-app.delete("/api/apk/:id", (req, res) => {
-  const id = Number(req.params.id);
-  let data = JSON.parse(fs.readFileSync(dataFile));
-
-  data = data.filter((apk) => apk.id !== id);
-  fs.writeFileSync(dataFile, JSON.stringify(data, null, 2));
-
-  res.json({ success: true });
-});
-
-// =======================
-// HEALTH CHECK
-// =======================
-app.get("/", (req, res) => {
-  res.send("Alpha APK Backend Running ✅");
-});
-
-// =======================
 // START SERVER
 // =======================
 app.listen(PORT, () => {
-  console.log("Server running on port", PORT);
+  console.log("Backend running on", PORT);
 });
+
 

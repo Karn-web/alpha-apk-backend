@@ -1,155 +1,119 @@
 const express = require("express");
+const mongoose = require("mongoose");
 const cors = require("cors");
 const multer = require("multer");
-const fs = require("fs");
-const path = require("path");
 const cloudinary = require("cloudinary").v2;
+const { CloudinaryStorage } = require("multer-storage-cloudinary");
 
 const app = express();
-const PORT = process.env.PORT || 5000;
 
-/* =======================
-   MIDDLEWARE
-======================= */
-app.use(express.json());
-
+/* ===================== CORS (CLOUDFLARE + RENDER) ===================== */
 app.use(
   cors({
     origin: [
-      "https://alphaapkstore.pages.dev",
-      "http://localhost:3000"
+      /^https:\/\/.*\.pages\.dev$/, // allow all Cloudflare Pages
+      "https://alpha-apk-backend.onrender.com"
     ],
-    methods: ["GET", "POST", "DELETE"],
-    allowedHeaders: ["Content-Type"]
+    methods: ["GET", "POST", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type"],
   })
 );
 
-/* =======================
-   CLOUDINARY CONFIG
-======================= */
+// IMPORTANT: handle preflight
+app.options("*", cors());
+
+/* ===================== MIDDLEWARE ===================== */
+app.use(express.json());
+
+/* ===================== MONGODB ===================== */
+mongoose
+  .connect(
+    "mongodb+srv://alphaadmin:.SECn9Xura4PZQD@cluster0.xiqttcr.mongodb.net/?appName=Cluster0"
+  )
+  .then(() => console.log("MongoDB Connected"))
+  .catch(console.error);
+
+/* ===================== CLOUDINARY ===================== */
 cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
+  cloud_name: "dousxvfmx",
+  api_key: "134438671712261",
+  api_secret: "-hb1GOMRrTdmwHrAPwsQd-Y8YYs",
 });
 
-/* =======================
-   FILE + STORAGE SETUP
-======================= */
-const dataFile = path.join(__dirname, "apks.json");
+/* ===================== MULTER ===================== */
+const storage = new CloudinaryStorage({
+  cloudinary,
+  params: async (req, file) => ({
+    folder:
+      file.mimetype === "application/vnd.android.package-archive"
+        ? "alpha-apk-store/apks"
+        : "alpha-apk-store/images",
+    resource_type: "auto",
+  }),
+});
 
-if (!fs.existsSync(dataFile)) {
-  fs.writeFileSync(dataFile, JSON.stringify([]));
-}
+const upload = multer({ storage });
 
-const upload = multer({ dest: "uploads/" });
+/* ===================== SCHEMA ===================== */
+const Apk = mongoose.model(
+  "Apk",
+  new mongoose.Schema(
+    {
+      name: String,
+      description: String,
+      category: String,
+      apkUrl: String,
+      imageUrl: String,
+    },
+    { timestamps: true }
+  )
+);
 
-/* =======================
-   ADMIN AUTH
-======================= */
+/* ===================== ADMIN AUTH ===================== */
 app.post("/api/admin-auth", (req, res) => {
-  const { code } = req.body;
+  if (req.body.code === "GURJANTSANDHU") {
+    return res.json({ success: true });
+  }
+  res.status(401).json({ success: false });
+});
 
-  if (code === "GURJANTSANDHU") {
+/* ===================== UPLOAD APK ===================== */
+app.post(
+  "/api/upload-apk",
+  upload.fields([
+    { name: "apk", maxCount: 1 },
+    { name: "image", maxCount: 1 },
+  ]),
+  async (req, res) => {
+    const apk = new Apk({
+      name: req.body.name,
+      description: req.body.description,
+      category: req.body.category,
+      apkUrl: req.files.apk[0].path,
+      imageUrl: req.files.image[0].path,
+    });
+
+    await apk.save();
     res.json({ success: true });
-  } else {
-    res.status(401).json({ success: false });
   }
+);
+
+/* ===================== FETCH APKS ===================== */
+app.get("/api/apks", async (req, res) => {
+  res.json(await Apk.find().sort({ createdAt: -1 }));
 });
 
-/* =======================
-   GET ALL APKS
-======================= */
-app.get("/api/apks", (req, res) => {
-  try {
-    const data = fs.readFileSync(dataFile, "utf-8");
-    res.json(JSON.parse(data || "[]"));
-  } catch (err) {
-    console.error("READ ERROR:", err);
-    res.status(500).json([]);
-  }
+/* ===================== DELETE APK ===================== */
+app.delete("/api/delete-apk/:id", async (req, res) => {
+  await Apk.findByIdAndDelete(req.params.id);
+  res.json({ success: true });
 });
 
-/* =======================
-   UPLOAD APK
-======================= */
-app.post("/api/upload", upload.fields([
-  { name: "apk", maxCount: 1 },
-  { name: "image", maxCount: 1 }
-]), async (req, res) => {
-  try {
-    const { name, description } = req.body;
+/* ===================== START ===================== */
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log("Render backend running"));
 
-    if (!req.files?.apk || !req.files?.image) {
-      return res.status(400).json({ success: false });
-    }
 
-    const apkUpload = await cloudinary.uploader.upload(
-      req.files.apk[0].path,
-      { resource_type: "raw", folder: "apks" }
-    );
-
-    const imgUpload = await cloudinary.uploader.upload(
-      req.files.image[0].path,
-      { folder: "apk-images" }
-    );
-
-    let data = JSON.parse(fs.readFileSync(dataFile, "utf-8") || "[]");
-
-    const newApk = {
-      id: Date.now(),
-      name,
-      description,
-      apkUrl: apkUpload.secure_url,
-      imageUrl: imgUpload.secure_url
-    };
-
-    data.push(newApk);
-    fs.writeFileSync(dataFile, JSON.stringify(data, null, 2));
-
-    res.json({ success: true });
-  } catch (err) {
-    console.error("UPLOAD ERROR:", err);
-    res.status(500).json({ success: false });
-  }
-});
-
-/* =======================
-   DELETE APK (500 SAFE)
-======================= */
-app.delete("/api/apk/:id", (req, res) => {
-  try {
-    const id = Number(req.params.id);
-
-    let data = [];
-    if (fs.existsSync(dataFile)) {
-      const raw = fs.readFileSync(dataFile, "utf-8");
-      data = raw ? JSON.parse(raw) : [];
-    }
-
-    const newData = data.filter(apk => apk.id !== id);
-    fs.writeFileSync(dataFile, JSON.stringify(newData, null, 2));
-
-    res.json({ success: true });
-  } catch (err) {
-    console.error("DELETE ERROR:", err);
-    res.status(500).json({ success: false });
-  }
-});
-
-/* =======================
-   ROOT CHECK
-======================= */
-app.get("/", (req, res) => {
-  res.send("APK Store Backend Running");
-});
-
-/* =======================
-   START SERVER
-======================= */
-app.listen(PORT, () => {
-  console.log("Server running on port", PORT);
-});
 
 
 

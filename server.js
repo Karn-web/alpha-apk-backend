@@ -7,19 +7,14 @@ const { CloudinaryStorage } = require("multer-storage-cloudinary");
 
 const app = express();
 
-/* ===================== CORS (CLOUDFLARE + RENDER) ===================== */
+/* ===================== CORS ===================== */
 app.use(
   cors({
-    origin: [
-      /^https:\/\/.*\.pages\.dev$/, // allow all Cloudflare Pages
-      "https://alpha-apk-backend.onrender.com"
-    ],
+    origin: /^https:\/\/.*\.pages\.dev$/,
     methods: ["GET", "POST", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type"],
   })
 );
-
-// IMPORTANT: handle preflight
 app.options("*", cors());
 
 /* ===================== MIDDLEWARE ===================== */
@@ -27,17 +22,15 @@ app.use(express.json());
 
 /* ===================== MONGODB ===================== */
 mongoose
-  .connect(
-    "mongodb+srv://alphaadmin:.SECn9Xura4PZQD@cluster0.xiqttcr.mongodb.net/?appName=Cluster0"
-  )
+  .connect(process.env.MONGO_URI)
   .then(() => console.log("MongoDB Connected"))
-  .catch(console.error);
+  .catch((err) => console.error("MongoDB error:", err));
 
-/* ===================== CLOUDINARY ===================== */
+/* ===================== CLOUDINARY (ENV SAFE) ===================== */
 cloudinary.config({
-  cloud_name: "dousxvfmx",
-  api_key: "134438671712261",
-  api_secret: "-hb1GOMRrTdmwHrAPwsQd-Y8YYs",
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
 /* ===================== MULTER ===================== */
@@ -54,7 +47,7 @@ const storage = new CloudinaryStorage({
 
 const upload = multer({ storage });
 
-/* ===================== SCHEMA ===================== */
+/* ===================== MODEL ===================== */
 const Apk = mongoose.model(
   "Apk",
   new mongoose.Schema(
@@ -69,7 +62,7 @@ const Apk = mongoose.model(
   )
 );
 
-/* ===================== ADMIN AUTH ===================== */
+/* ===================== ADMIN ===================== */
 app.post("/api/admin-auth", (req, res) => {
   if (req.body.code === "GURJANTSANDHU") {
     return res.json({ success: true });
@@ -85,25 +78,34 @@ app.post(
     { name: "image", maxCount: 1 },
   ]),
   async (req, res) => {
-    const apk = new Apk({
-      name: req.body.name,
-      description: req.body.description,
-      category: req.body.category,
-      apkUrl: req.files.apk[0].path,
-      imageUrl: req.files.image[0].path,
-    });
+    try {
+      if (!req.files || !req.files.apk || !req.files.image) {
+        return res.status(400).json({ message: "Files missing" });
+      }
 
-    await apk.save();
-    res.json({ success: true });
+      const apk = new Apk({
+        name: req.body.name,
+        description: req.body.description,
+        category: req.body.category,
+        apkUrl: req.files.apk[0].path,
+        imageUrl: req.files.image[0].path,
+      });
+
+      await apk.save();
+      res.json({ success: true });
+    } catch (err) {
+      console.error("UPLOAD ERROR:", err);
+      res.status(500).json({ message: "Upload failed" });
+    }
   }
 );
 
-/* ===================== FETCH APKS ===================== */
+/* ===================== FETCH ===================== */
 app.get("/api/apks", async (req, res) => {
   res.json(await Apk.find().sort({ createdAt: -1 }));
 });
 
-/* ===================== DELETE APK ===================== */
+/* ===================== DELETE ===================== */
 app.delete("/api/delete-apk/:id", async (req, res) => {
   await Apk.findByIdAndDelete(req.params.id);
   res.json({ success: true });
@@ -111,7 +113,8 @@ app.delete("/api/delete-apk/:id", async (req, res) => {
 
 /* ===================== START ===================== */
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log("Render backend running"));
+app.listen(PORT, () => console.log("Backend running"));
+
 
 
 

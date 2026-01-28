@@ -1,8 +1,10 @@
 const express = require("express");
-const fs = require("fs");
-const path = require("path");
 const cors = require("cors");
 const multer = require("multer");
+const fs = require("fs");
+const path = require("path");
+const cloudinary = require("cloudinary").v2;
+const { CloudinaryStorage } = require("multer-storage-cloudinary");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -10,61 +12,72 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-// ================== FILE PATHS ==================
-const DATA_FILE = path.join(__dirname, "apks.json");
-const APK_DIR = path.join(__dirname, "uploads/apks");
-const IMAGE_DIR = path.join(__dirname, "uploads/images");
+// =====================
+// CLOUDINARY CONFIG
+// =====================
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
-// ================== ENSURE DIRS ==================
-if (!fs.existsSync("uploads")) fs.mkdirSync("uploads");
-if (!fs.existsSync(APK_DIR)) fs.mkdirSync(APK_DIR, { recursive: true });
-if (!fs.existsSync(IMAGE_DIR)) fs.mkdirSync(IMAGE_DIR, { recursive: true });
-if (!fs.existsSync(DATA_FILE)) fs.writeFileSync(DATA_FILE, "[]");
+// =====================
+// MULTER STORAGE
+// =====================
+const apkStorage = new CloudinaryStorage({
+  cloudinary,
+  params: {
+    folder: "alpha-apk-store/apks",
+    resource_type: "raw",
+  },
+});
 
-// ================== STATIC ==================
-app.use("/uploads", express.static("uploads"));
+const imageStorage = new CloudinaryStorage({
+  cloudinary,
+  params: {
+    folder: "alpha-apk-store/images",
+    resource_type: "image",
+  },
+});
 
-// ================== READ / WRITE ==================
-const readApks = () =>
-  JSON.parse(fs.readFileSync(DATA_FILE, "utf-8"));
+const upload = multer({
+  storage: (req, file, cb) => {
+    if (file.fieldname === "apk") cb(null, apkStorage);
+    else cb(null, imageStorage);
+  },
+});
 
-const writeApks = (data) =>
-  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+// =====================
+// DATA FILE
+// =====================
+const dataFile = path.join(__dirname, "apks.json");
 
-// ================== ADMIN AUTH ==================
+if (!fs.existsSync(dataFile)) {
+  fs.writeFileSync(dataFile, JSON.stringify([]));
+}
+
+// =====================
+// ADMIN AUTH
+// =====================
 app.post("/api/admin-auth", (req, res) => {
   const { code } = req.body;
-
   if (code === "GURJANTSANDHU") {
     return res.json({ success: true });
   }
-
-  res.status(401).json({ success: false, message: "Invalid code" });
+  res.status(401).json({ success: false });
 });
 
-// ================== GET APKs ==================
+// =====================
+// GET ALL APKS
+// =====================
 app.get("/api/apks", (req, res) => {
-  try {
-    res.json(readApks());
-  } catch {
-    res.status(500).json([]);
-  }
+  const data = JSON.parse(fs.readFileSync(dataFile));
+  res.json(data);
 });
 
-// ================== MULTER ==================
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    if (file.fieldname === "apk") cb(null, APK_DIR);
-    else cb(null, IMAGE_DIR);
-  },
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + "-" + file.originalname);
-  },
-});
-
-const upload = multer({ storage });
-
-// ================== UPLOAD APK ==================
+// =====================
+// UPLOAD APK
+// =====================
 app.post(
   "/api/upload",
   upload.fields([
@@ -72,73 +85,46 @@ app.post(
     { name: "image", maxCount: 1 },
   ]),
   (req, res) => {
-    try {
-      const { name, description } = req.body;
+    const { name, description, category } = req.body;
 
-      if (!req.files.apk) {
-        return res.status(400).json({ message: "APK required" });
-      }
-
-      const apks = readApks();
-
-      const newApk = {
-        id: Date.now(),
-        name,
-        description,
-        apkPath: `uploads/apks/${req.files.apk[0].filename}`,
-        imagePath: req.files.image
-          ? `uploads/images/${req.files.image[0].filename}`
-          : "",
-      };
-
-      apks.push(newApk);
-      writeApks(apks);
-
-      res.json({ success: true });
-    } catch (e) {
-      res.status(500).json({ success: false });
+    if (!req.files.apk || !req.files.image) {
+      return res.status(400).json({ message: "Files missing" });
     }
+
+    const apkFile = req.files.apk[0];
+    const imageFile = req.files.image[0];
+
+    const data = JSON.parse(fs.readFileSync(dataFile));
+
+    const newApk = {
+      id: Date.now(),
+      name,
+      description,
+      category,
+      apkUrl: apkFile.path,     // Cloudinary URL
+      imageUrl: imageFile.path, // Cloudinary URL
+    };
+
+    data.push(newApk);
+    fs.writeFileSync(dataFile, JSON.stringify(data, null, 2));
+
+    res.json({ success: true });
   }
 );
 
-// ================== DELETE APK ==================
-app.delete("/api/apks/:id", (req, res) => {
+// =====================
+// DELETE APK
+// =====================
+app.delete("/api/apk/:id", (req, res) => {
   const id = Number(req.params.id);
-  let apks = readApks();
+  let data = JSON.parse(fs.readFileSync(dataFile));
 
-  const apk = apks.find((a) => a.id === id);
-  if (!apk) return res.json({ success: true });
-
-  if (apk.apkPath) fs.unlinkSync(apk.apkPath);
-  if (apk.imagePath) fs.unlinkSync(apk.imagePath);
-
-  apks = apks.filter((a) => a.id !== id);
-  writeApks(apks);
+  data = data.filter((apk) => apk.id !== id);
+  fs.writeFileSync(dataFile, JSON.stringify(data, null, 2));
 
   res.json({ success: true });
 });
 
-// ================== START ==================
 app.listen(PORT, () => {
-  console.log("Server running on", PORT);
+  console.log("Server running on port", PORT);
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

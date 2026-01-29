@@ -7,102 +7,95 @@ const fs = require("fs");
 
 const app = express();
 
-/* ===================== BASIC ===================== */
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+/* ================= MIDDLEWARE ================= */
+app.use(cors());
+app.use(express.json({ limit: "500mb" }));
+app.use(express.urlencoded({ extended: true, limit: "500mb" }));
 
-app.use(
-  cors({
-    origin: "*",
-    methods: ["GET", "POST", "DELETE"],
-    allowedHeaders: ["Content-Type"],
-  })
-);
-
-/* ===================== UPLOADS DIR ===================== */
-const uploadDir = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir);
-}
-app.use("/uploads", express.static(uploadDir));
-
-/* ===================== MULTER (300MB SAFE) ===================== */
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, "uploads/"),
-  filename: (req, file, cb) => {
-    const unique =
-      Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, unique + path.extname(file.originalname));
-  },
-});
-
-const upload = multer({
-  storage,
-  limits: {
-    fileSize: 300 * 1024 * 1024, // 🔥 300MB
-  },
-});
-
-/* ===================== MONGODB ===================== */
+/* ================= MONGODB ================= */
 mongoose
   .connect(process.env.MONGO_URI, {
     useNewUrlParser: true,
-    useUnifiedTopology: true,
+    useUnifiedTopology: true
   })
   .then(() => console.log("✅ MongoDB Connected"))
-  .catch((err) => console.error("❌ Mongo Error:", err));
+  .catch(err => console.error("❌ Mongo Error:", err));
 
-/* ===================== SCHEMA ===================== */
+/* ================= APK SCHEMA ================= */
 const ApkSchema = new mongoose.Schema({
-  name: String,
+  name: { type: String, required: true },
   description: String,
   category: String,
-  apkPath: String,
-  imagePath: String,
-  createdAt: { type: Date, default: Date.now },
+  apkUrl: { type: String, required: true },
+  imageUrl: String,
+  createdAt: { type: Date, default: Date.now }
 });
 
 const Apk = mongoose.model("Apk", ApkSchema);
 
-/* ===================== ADMIN AUTH ===================== */
-app.post("/api/admin-auth", (req, res) => {
-  if (req.body.code === "GURJANTSANDHU") {
-    return res.json({ success: true });
+/* ================= MULTER SETUP ================= */
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = "uploads";
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir);
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + "-" + file.originalname);
   }
-  res.status(401).json({ success: false });
 });
 
-/* ===================== UPLOAD APK ===================== */
+const upload = multer({
+  storage,
+  limits: { fileSize: 1024 * 1024 * 200 } // 200MB
+});
+
+/* ================= ROUTES ================= */
+
+// GET ALL APKS
+app.get("/api/apks", async (req, res) => {
+  try {
+    const apks = await Apk.find().sort({ createdAt: -1 });
+    res.json(apks);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch APKs" });
+  }
+});
+
+// UPLOAD APK
 app.post(
   "/api/upload-apk",
   upload.fields([
     { name: "apk", maxCount: 1 },
-    { name: "image", maxCount: 1 },
+    { name: "image", maxCount: 1 }
   ]),
   async (req, res) => {
     try {
-      if (!req.files?.apk || !req.files?.image) {
-        return res.status(400).json({ error: "Files missing" });
-      }
-
       const { name, description, category } = req.body;
-      if (!name || !description || !category) {
-        return res.status(400).json({ error: "Fields missing" });
+
+      if (!req.files || !req.files.apk) {
+        return res.status(400).json({ error: "APK file missing" });
       }
 
       const apkFile = req.files.apk[0];
-      const imgFile = req.files.image[0];
+      const imageFile = req.files.image ? req.files.image[0] : null;
 
-      const apk = new Apk({
+      const apkUrl = `${req.protocol}://${req.get("host")}/uploads/${apkFile.filename}`;
+      const imageUrl = imageFile
+        ? `${req.protocol}://${req.get("host")}/uploads/${imageFile.filename}`
+        : "";
+
+      const newApk = new Apk({
         name,
         description,
         category,
-        apkPath: apkFile.filename,
-        imagePath: imgFile.filename,
+        apkUrl,
+        imageUrl
       });
 
-      await apk.save();
-      res.json({ success: true });
+      const savedApk = await newApk.save(); // 🔥 THIS WAS MISSING / FAILING
+
+      res.json(savedApk);
     } catch (err) {
       console.error("UPLOAD ERROR:", err);
       res.status(500).json({ error: "Upload failed" });
@@ -110,33 +103,13 @@ app.post(
   }
 );
 
-/* ===================== GET APKS ===================== */
-app.get("/api/apks", async (req, res) => {
-  const apks = await Apk.find().sort({ createdAt: -1 });
-  res.json(apks);
-});
+// SERVE FILES
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
-/* ===================== DELETE APK ===================== */
-app.delete("/api/delete-apk/:id", async (req, res) => {
-  try {
-    const apk = await Apk.findById(req.params.id);
-    if (!apk) return res.status(404).json({ error: "Not found" });
-
-    fs.unlinkSync(path.join(uploadDir, apk.apkPath));
-    fs.unlinkSync(path.join(uploadDir, apk.imagePath));
-
-    await Apk.findByIdAndDelete(req.params.id);
-    res.json({ success: true });
-  } catch {
-    res.status(500).json({ error: "Delete failed" });
-  }
-});
-
-/* ===================== START ===================== */
+/* ================= START SERVER ================= */
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () =>
-  console.log("🚀 Backend running on", PORT)
-);
+app.listen(PORT, () => console.log(`🚀 Server running on ${PORT}`));
+
 
 
 

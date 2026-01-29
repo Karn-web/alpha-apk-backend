@@ -8,14 +8,31 @@ const { CloudinaryStorage } = require("multer-storage-cloudinary");
 const app = express();
 
 /* ===================== CORS ===================== */
+const allowedOrigins = [
+  "https://alphaapkstore.pages.dev",
+  "https://alphaapkstore.xyz",
+  "https://www.alphaapkstore.xyz",
+];
+
 app.use(
   cors({
-    origin: /^https:\/\/.*\.pages\.dev$/,
+    origin: function (origin, callback) {
+      // allow requests with no origin (like curl, mobile apps)
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      } else {
+        return callback(new Error("CORS not allowed"));
+      }
+    },
     methods: ["GET", "POST", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type"],
   })
 );
+
 app.options("*", cors());
+
 
 /* ===================== MIDDLEWARE ===================== */
 app.use(express.json());

@@ -1,43 +1,26 @@
-import express from "express";
-import cors from "cors";
-import multer from "multer";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+const express = require("express");
+const multer = require("multer");
+const path = require("path");
+const cors = require("cors");
+const fs = require("fs");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-const ADMIN_CODE = process.env.ADMIN_CODE || "GURJANTSANDHU";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-// ---------- Middleware ----------
+/* ================= MIDDLEWARE ================= */
+app.use(cors());
 app.use(express.json());
 
-app.use(
-  cors({
-    origin: [
-      "https://alphaapkstore.xyz",
-      "https://www.alphaapkstore.xyz",
-      "https://alphaapkstore.pages.dev",
-      "http://localhost:3000",
-    ],
-    methods: ["GET", "POST", "DELETE"],
-  })
-);
-
-// ---------- Ensure folders/files ----------
+/* ================= UPLOAD FOLDER ================= */
 const uploadDir = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir);
+}
 
-const dataFile = path.join(__dirname, "apks.json");
-if (!fs.existsSync(dataFile)) fs.writeFileSync(dataFile, "[]");
-
-// ---------- Serve uploads ----------
+/* ================= STATIC FILES ================= */
 app.use("/uploads", express.static(uploadDir));
 
-// ---------- Multer (200MB support) ----------
+/* ================= MULTER (200MB) ================= */
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
   filename: (req, file, cb) =>
@@ -49,21 +32,19 @@ const upload = multer({
   limits: { fileSize: 200 * 1024 * 1024 }, // 200MB
 });
 
-// ---------- Helpers ----------
-const readApks = () => JSON.parse(fs.readFileSync(dataFile));
-const writeApks = (data) =>
-  fs.writeFileSync(dataFile, JSON.stringify(data, null, 2));
+/* ================= IN-MEMORY APK STORE ================= */
+let apks = [];
 
-// ---------- ROUTES ----------
-
-// ✅ Admin Auth
+/* ================= ADMIN AUTH ================= */
 app.post("/api/admin-auth", (req, res) => {
   const { code } = req.body;
-  if (code === ADMIN_CODE) return res.json({ success: true });
+  if (code === "GURJANTSANDHU") {
+    return res.json({ success: true });
+  }
   res.status(401).json({ success: false, message: "Invalid code" });
 });
 
-// ✅ Upload APK
+/* ================= UPLOAD APK ================= */
 app.post(
   "/api/upload-apk",
   upload.fields([
@@ -73,58 +54,57 @@ app.post(
   (req, res) => {
     try {
       const { name, description, category } = req.body;
-      if (!req.files?.apk || !req.files?.image) {
-        return res.status(400).json({ error: "Files missing" });
+
+      if (!req.files.apk) {
+        return res.status(400).json({ message: "APK required" });
       }
 
-      const apks = readApks();
+      const apkFile = req.files.apk[0];
+      const imageFile = req.files.image ? req.files.image[0] : null;
+
+      const backendURL = "https://alpha-apk-backend.onrender.com";
 
       const newApk = {
-        id: Date.now().toString(),
+        id: Date.now(),
         name,
         description,
         category,
-        apkUrl: `/uploads/${req.files.apk[0].filename}`,
-        imageUrl: `/uploads/${req.files.image[0].filename}`,
-        createdAt: new Date(),
+        apkUrl: `${backendURL}/uploads/${apkFile.filename}`,
+        imageUrl: imageFile
+          ? `${backendURL}/uploads/${imageFile.filename}`
+          : "",
       };
 
       apks.unshift(newApk);
-      writeApks(apks);
-
       res.json({ success: true, apk: newApk });
     } catch (err) {
       console.error(err);
-      res.status(500).json({ error: "Upload failed" });
+      res.status(500).json({ message: "Upload failed" });
     }
   }
 );
 
-// ✅ Get all APKs
+/* ================= GET ALL APKS ================= */
 app.get("/api/apks", (req, res) => {
-  res.json(readApks());
+  res.json(apks);
 });
 
-// ✅ Delete APK
+/* ================= DELETE APK ================= */
 app.delete("/api/delete-apk/:id", (req, res) => {
-  try {
-    const apks = readApks();
-    const apk = apks.find((a) => a.id === req.params.id);
-    if (!apk) return res.status(404).json({ error: "Not found" });
-
-    fs.unlinkSync(path.join(__dirname, apk.apkUrl));
-    fs.unlinkSync(path.join(__dirname, apk.imageUrl));
-
-    writeApks(apks.filter((a) => a.id !== req.params.id));
-    res.json({ success: true });
-  } catch {
-    res.status(500).json({ error: "Delete failed" });
-  }
+  const id = Number(req.params.id);
+  apks = apks.filter((apk) => apk.id !== id);
+  res.json({ success: true });
 });
 
-// ---------- Start ----------
+/* ================= ROOT ================= */
+app.get("/", (req, res) => {
+  res.send("Alpha APK Backend Running ✅");
+});
+
+/* ================= START ================= */
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log("Server running on port", PORT);
 });
+
 
 

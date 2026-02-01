@@ -1,100 +1,98 @@
 import express from "express";
 import cors from "cors";
 import multer from "multer";
-import path from "path";
 import fs from "fs";
+import path from "path";
 import { fileURLToPath } from "url";
-import { createClient } from "@supabase/supabase-js";
+
+const app = express();
+const PORT = process.env.PORT || 5000;
+const ADMIN_CODE = process.env.ADMIN_CODE || "GURJANTSANDHU";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const app = express();
-const PORT = process.env.PORT || 5000;
-
-/* ===================== MIDDLEWARE ===================== */
-app.use(cors({
-  origin: "*",
-  methods: ["GET", "POST", "DELETE"],
-  allowedHeaders: ["Content-Type"]
-}));
+// ---------- Middleware ----------
 app.use(express.json());
-app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
-/* ===================== SUPABASE ===================== */
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
+app.use(
+  cors({
+    origin: [
+      "https://alphaapkstore.xyz",
+      "https://www.alphaapkstore.xyz",
+      "https://alphaapkstore.pages.dev",
+      "http://localhost:3000",
+    ],
+    methods: ["GET", "POST", "DELETE"],
+  })
 );
 
-/* ===================== ADMIN AUTH (FIXES 404) ===================== */
-app.post("/api/admin-auth", (req, res) => {
-  const { code } = req.body;
+// ---------- Ensure folders/files ----------
+const uploadDir = path.join(__dirname, "uploads");
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
 
-  if (code === process.env.ADMIN_CODE) {
-    return res.json({ success: true });
-  }
+const dataFile = path.join(__dirname, "apks.json");
+if (!fs.existsSync(dataFile)) fs.writeFileSync(dataFile, "[]");
 
-  return res.status(401).json({
-    success: false,
-    message: "Invalid admin code"
-  });
-});
+// ---------- Serve uploads ----------
+app.use("/uploads", express.static(uploadDir));
 
-/* ===================== MULTER (200MB SUPPORT) ===================== */
+// ---------- Multer (200MB support) ----------
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const dir = "uploads";
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir);
-    cb(null, dir);
-  },
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + "-" + file.originalname);
-  }
+  destination: (req, file, cb) => cb(null, uploadDir),
+  filename: (req, file, cb) =>
+    cb(null, Date.now() + "-" + file.originalname),
 });
 
 const upload = multer({
   storage,
-  limits: { fileSize: 200 * 1024 * 1024 } // 200MB
+  limits: { fileSize: 200 * 1024 * 1024 }, // 200MB
 });
 
-/* ===================== UPLOAD APK ===================== */
+// ---------- Helpers ----------
+const readApks = () => JSON.parse(fs.readFileSync(dataFile));
+const writeApks = (data) =>
+  fs.writeFileSync(dataFile, JSON.stringify(data, null, 2));
+
+// ---------- ROUTES ----------
+
+// ✅ Admin Auth
+app.post("/api/admin-auth", (req, res) => {
+  const { code } = req.body;
+  if (code === ADMIN_CODE) return res.json({ success: true });
+  res.status(401).json({ success: false, message: "Invalid code" });
+});
+
+// ✅ Upload APK
 app.post(
   "/api/upload-apk",
   upload.fields([
     { name: "apk", maxCount: 1 },
-    { name: "image", maxCount: 1 }
+    { name: "image", maxCount: 1 },
   ]),
-  async (req, res) => {
+  (req, res) => {
     try {
       const { name, description, category } = req.body;
+      if (!req.files?.apk || !req.files?.image) {
+        return res.status(400).json({ error: "Files missing" });
+      }
 
-      const apkFile = req.files.apk[0];
-      const imageFile = req.files.image[0];
+      const apks = readApks();
 
-      const apkPath = `${Date.now()}-${apkFile.originalname}`;
-      const imagePath = `${Date.now()}-${imageFile.originalname}`;
+      const newApk = {
+        id: Date.now().toString(),
+        name,
+        description,
+        category,
+        apkUrl: `/uploads/${req.files.apk[0].filename}`,
+        imageUrl: `/uploads/${req.files.image[0].filename}`,
+        createdAt: new Date(),
+      };
 
-      // Upload APK
-      await supabase.storage
-        .from("apks")
-        .upload(apkPath, fs.createReadStream(apkFile.path));
+      apks.unshift(newApk);
+      writeApks(apks);
 
-      // Upload Image
-      await supabase.storage
-        .from("images")
-        .upload(imagePath, fs.createReadStream(imageFile.path));
-
-      const apkUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/apks/${apkPath}`;
-      const imageUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/images/${imagePath}`;
-
-      const { error } = await supabase.from("apks").insert([
-        { name, description, category, apkUrl, imageUrl }
-      ]);
-
-      if (error) throw error;
-
-      res.json({ success: true });
+      res.json({ success: true, apk: newApk });
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: "Upload failed" });
@@ -102,33 +100,31 @@ app.post(
   }
 );
 
-/* ===================== GET APKS ===================== */
-app.get("/api/apks", async (req, res) => {
-  const { data, error } = await supabase
-    .from("apks")
-    .select("*")
-    .order("id", { ascending: false });
-
-  if (error) return res.status(500).json({ error });
-  res.json(data);
+// ✅ Get all APKs
+app.get("/api/apks", (req, res) => {
+  res.json(readApks());
 });
 
-/* ===================== DELETE APK ===================== */
-app.delete("/api/delete-apk/:id", async (req, res) => {
-  const { id } = req.params;
+// ✅ Delete APK
+app.delete("/api/delete-apk/:id", (req, res) => {
+  try {
+    const apks = readApks();
+    const apk = apks.find((a) => a.id === req.params.id);
+    if (!apk) return res.status(404).json({ error: "Not found" });
 
-  const { error } = await supabase
-    .from("apks")
-    .delete()
-    .eq("id", id);
+    fs.unlinkSync(path.join(__dirname, apk.apkUrl));
+    fs.unlinkSync(path.join(__dirname, apk.imageUrl));
 
-  if (error) return res.status(500).json({ error });
-
-  res.json({ success: true });
+    writeApks(apks.filter((a) => a.id !== req.params.id));
+    res.json({ success: true });
+  } catch {
+    res.status(500).json({ error: "Delete failed" });
+  }
 });
 
-/* ===================== START SERVER ===================== */
+// ---------- Start ----------
 app.listen(PORT, () => {
-  console.log("Server running on port", PORT);
+  console.log(`Server running on port ${PORT}`);
 });
+
 

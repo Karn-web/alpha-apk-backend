@@ -1,41 +1,40 @@
-const express = require("express");
-const multer = require("multer");
-const cors = require("cors");
-const { createClient } = require("@supabase/supabase-js");
+import express from "express";
+import cors from "cors";
+import multer from "multer";
+import { createClient } from "@supabase/supabase-js";
 
 const app = express();
-const PORT = process.env.PORT || 5000;
-
-/* ================= CONFIG ================= */
-const SUPABASE_URL = "https://ihboelpgtrzswkanahom.supabase.co";
-const SUPABASE_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImloYm9lbHBndHJ6c3drYW5haG9tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk3Nzk3ODIsImV4cCI6MjA4NTM1NTc4Mn0.T0pVvICEavuonRuen6vXKcgPR-rnpOtDk_pRwdf5raU";
-
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-
-/* ================= MIDDLEWARE ================= */
 app.use(cors());
 app.use(express.json());
 
-/* ================= MULTER (MEMORY, 200MB) ================= */
+/* ================= SUPABASE ================= */
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
+
+const APK_BUCKET = "apks";
+const IMAGE_BUCKET = "images";
+const TABLE_NAME = "apks";
+
+/* ================= MULTER ================= */
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 200 * 1024 * 1024 },
+  limits: { fileSize: 200 * 1024 * 1024 }, // 200MB
 });
 
-/* ================= TEMP STORE ================= */
-let apks = [];
-
 /* ================= ADMIN AUTH ================= */
+const ADMIN_CODE = "GURJANTSANDHU";
+
 app.post("/api/admin-auth", (req, res) => {
   const { code } = req.body;
-  if (code === "GURJANTSANDHU") {
+  if (code === ADMIN_CODE) {
     return res.json({ success: true });
   }
   res.status(401).json({ success: false });
 });
 
-/* ================= UPLOAD APK (PERMANENT) ================= */
+/* ================= UPLOAD APK ================= */
 app.post(
   "/api/upload-apk",
   upload.fields([
@@ -46,71 +45,103 @@ app.post(
     try {
       const { name, description, category } = req.body;
 
+      if (!req.files?.apk) {
+        return res.status(400).json({ error: "APK file required" });
+      }
+
       const apkFile = req.files.apk[0];
       const imageFile = req.files.image?.[0];
 
-      const apkPath = `apks/${Date.now()}-${apkFile.originalname}`;
-      const imgPath = imageFile
-        ? `images/${Date.now()}-${imageFile.originalname}`
+      const apkPath = `apk/${Date.now()}-${apkFile.originalname}`;
+      const imagePath = imageFile
+        ? `image/${Date.now()}-${imageFile.originalname}`
         : null;
 
-      await supabase.storage
-        .from("alpha-apks")
+      /* Upload APK */
+      const { error: apkErr } = await supabase.storage
+        .from(APK_BUCKET)
         .upload(apkPath, apkFile.buffer, {
           contentType: apkFile.mimetype,
+          upsert: false,
         });
 
-      let imageUrl = "";
-      if (imgPath) {
-        await supabase.storage
-          .from("alpha-apks")
-          .upload(imgPath, imageFile.buffer, {
+      if (apkErr) throw apkErr;
+
+      /* Upload Image (optional) */
+      if (imagePath) {
+        const { error: imgErr } = await supabase.storage
+          .from(IMAGE_BUCKET)
+          .upload(imagePath, imageFile.buffer, {
             contentType: imageFile.mimetype,
+            upsert: false,
           });
 
-        imageUrl = `${SUPABASE_URL}/storage/v1/object/public/alpha-apks/${imgPath}`;
+        if (imgErr) throw imgErr;
       }
 
-      const apkUrl = `${SUPABASE_URL}/storage/v1/object/public/alpha-apks/${apkPath}`;
+      /* Save metadata */
+      const { error: dbErr } = await supabase.from(TABLE_NAME).insert([
+        {
+          name,
+          description,
+          category,
+          apk_url: apkPath,
+          image_url: imagePath,
+        },
+      ]);
 
-      const newApk = {
-        id: Date.now(),
-        name,
-        description,
-        category,
-        apkUrl,
-        imageUrl,
-      };
+      if (dbErr) throw dbErr;
 
-      apks.unshift(newApk);
-      res.json({ success: true, apk: newApk });
+      res.json({ success: true });
     } catch (err) {
-      console.error(err);
-      res.status(500).json({ message: "Upload failed" });
+      console.error("UPLOAD ERROR:", err);
+      res.status(500).json({ error: "Upload failed" });
     }
   }
 );
 
-/* ================= GET APKS ================= */
-app.get("/api/apks", (req, res) => {
-  res.json(apks);
+/* ================= GET APK LIST ================= */
+app.get("/api/apks", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from(TABLE_NAME)
+      .select("*")
+      .order("id", { ascending: false });
+
+    if (error) throw error;
+
+    const safeData = data.map((apk) => {
+      const apkPublic =
+        typeof apk.apk_url === "string"
+          ? supabase.storage
+              .from(APK_BUCKET)
+              .getPublicUrl(apk.apk_url).data.publicUrl
+          : null;
+
+      const imagePublic =
+        typeof apk.image_url === "string"
+          ? supabase.storage
+              .from(IMAGE_BUCKET)
+              .getPublicUrl(apk.image_url).data.publicUrl
+          : null;
+
+      return {
+        ...apk,
+        apkUrl: apkPublic,
+        imageUrl: imagePublic,
+      };
+    });
+
+    res.json(safeData);
+  } catch (err) {
+    console.error("FETCH ERROR:", err);
+    res.status(500).json([]);
+  }
 });
 
-/* ================= DELETE APK ================= */
-app.delete("/api/delete-apk/:id", (req, res) => {
-  const id = Number(req.params.id);
-  apks = apks.filter((a) => a.id !== id);
-  res.json({ success: true });
-});
-
-/* ================= ROOT ================= */
-app.get("/", (req, res) => {
-  res.send("Alpha APK Backend (Permanent Storage) ✅");
-});
-
+/* ================= START SERVER ================= */
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log("Server running on", PORT);
+  console.log("Server running on port", PORT);
 });
-
-
 

@@ -1,38 +1,29 @@
 const express = require("express");
 const multer = require("multer");
-const path = require("path");
 const cors = require("cors");
-const fs = require("fs");
+const { createClient } = require("@supabase/supabase-js");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+/* ================= CONFIG ================= */
+const SUPABASE_URL = "https://ihboelpgtrzswkanahom.supabase.co";
+const SUPABASE_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImloYm9lbHBndHJ6c3drYW5haG9tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk3Nzk3ODIsImV4cCI6MjA4NTM1NTc4Mn0.T0pVvICEavuonRuen6vXKcgPR-rnpOtDk_pRwdf5raU";
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 /* ================= MIDDLEWARE ================= */
 app.use(cors());
 app.use(express.json());
 
-/* ================= UPLOAD FOLDER ================= */
-const uploadDir = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir);
-}
-
-/* ================= STATIC FILES ================= */
-app.use("/uploads", express.static(uploadDir));
-
-/* ================= MULTER (200MB) ================= */
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadDir),
-  filename: (req, file, cb) =>
-    cb(null, Date.now() + "-" + file.originalname),
-});
-
+/* ================= MULTER (MEMORY, 200MB) ================= */
 const upload = multer({
-  storage,
-  limits: { fileSize: 200 * 1024 * 1024 }, // 200MB
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 200 * 1024 * 1024 },
 });
 
-/* ================= IN-MEMORY APK STORE ================= */
+/* ================= TEMP STORE ================= */
 let apks = [];
 
 /* ================= ADMIN AUTH ================= */
@@ -41,38 +32,54 @@ app.post("/api/admin-auth", (req, res) => {
   if (code === "GURJANTSANDHU") {
     return res.json({ success: true });
   }
-  res.status(401).json({ success: false, message: "Invalid code" });
+  res.status(401).json({ success: false });
 });
 
-/* ================= UPLOAD APK ================= */
+/* ================= UPLOAD APK (PERMANENT) ================= */
 app.post(
   "/api/upload-apk",
   upload.fields([
     { name: "apk", maxCount: 1 },
     { name: "image", maxCount: 1 },
   ]),
-  (req, res) => {
+  async (req, res) => {
     try {
       const { name, description, category } = req.body;
 
-      if (!req.files.apk) {
-        return res.status(400).json({ message: "APK required" });
+      const apkFile = req.files.apk[0];
+      const imageFile = req.files.image?.[0];
+
+      const apkPath = `apks/${Date.now()}-${apkFile.originalname}`;
+      const imgPath = imageFile
+        ? `images/${Date.now()}-${imageFile.originalname}`
+        : null;
+
+      await supabase.storage
+        .from("alpha-apks")
+        .upload(apkPath, apkFile.buffer, {
+          contentType: apkFile.mimetype,
+        });
+
+      let imageUrl = "";
+      if (imgPath) {
+        await supabase.storage
+          .from("alpha-apks")
+          .upload(imgPath, imageFile.buffer, {
+            contentType: imageFile.mimetype,
+          });
+
+        imageUrl = `${SUPABASE_URL}/storage/v1/object/public/alpha-apks/${imgPath}`;
       }
 
-      const apkFile = req.files.apk[0];
-      const imageFile = req.files.image ? req.files.image[0] : null;
-
-      const backendURL = "https://alpha-apk-backend.onrender.com";
+      const apkUrl = `${SUPABASE_URL}/storage/v1/object/public/alpha-apks/${apkPath}`;
 
       const newApk = {
         id: Date.now(),
         name,
         description,
         category,
-        apkUrl: `${backendURL}/uploads/${apkFile.filename}`,
-        imageUrl: imageFile
-          ? `${backendURL}/uploads/${imageFile.filename}`
-          : "",
+        apkUrl,
+        imageUrl,
       };
 
       apks.unshift(newApk);
@@ -84,7 +91,7 @@ app.post(
   }
 );
 
-/* ================= GET ALL APKS ================= */
+/* ================= GET APKS ================= */
 app.get("/api/apks", (req, res) => {
   res.json(apks);
 });
@@ -92,18 +99,17 @@ app.get("/api/apks", (req, res) => {
 /* ================= DELETE APK ================= */
 app.delete("/api/delete-apk/:id", (req, res) => {
   const id = Number(req.params.id);
-  apks = apks.filter((apk) => apk.id !== id);
+  apks = apks.filter((a) => a.id !== id);
   res.json({ success: true });
 });
 
 /* ================= ROOT ================= */
 app.get("/", (req, res) => {
-  res.send("Alpha APK Backend Running ✅");
+  res.send("Alpha APK Backend (Permanent Storage) ✅");
 });
 
-/* ================= START ================= */
 app.listen(PORT, () => {
-  console.log("Server running on port", PORT);
+  console.log("Server running on", PORT);
 });
 
 

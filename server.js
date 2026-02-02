@@ -7,26 +7,28 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 /* =======================
-   CORS CONFIG
+   FORCE CORS (VERY IMPORTANT)
 ======================= */
-app.use(
-  cors({
-    origin: [
-      "https://alphaapkstore.pages.dev",
-      "http://localhost:3000",
-    ],
-    methods: ["GET", "POST", "DELETE"],
-    allowedHeaders: ["Content-Type"],
-  })
-);
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
+app.use(cors());
 app.use(express.json());
 
 /* =======================
    SUPABASE CONFIG
 ======================= */
 const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SUPABASE_SERVICE_ROLE_KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const supabase = createClient(
   SUPABASE_URL,
@@ -70,7 +72,7 @@ app.post(
       const { name, description, category } = req.body;
 
       if (!req.files?.apk) {
-        return res.status(400).json({ error: "APK file missing" });
+        return res.status(400).json({ error: "APK missing" });
       }
 
       const apkFile = req.files.apk[0];
@@ -120,14 +122,14 @@ app.post(
 
       res.json({ success: true });
     } catch (err) {
-      console.error(err);
+      console.error("UPLOAD ERROR:", err);
       res.status(500).json({ error: "Upload failed" });
     }
   }
 );
 
 /* =======================
-   GET APKs (HOME)
+   GET APKs
 ======================= */
 app.get("/api/apks", async (req, res) => {
   const { data, error } = await supabase
@@ -136,7 +138,7 @@ app.get("/api/apks", async (req, res) => {
     .order("id", { ascending: false });
 
   if (error) {
-    return res.status(500).json({ error: "Failed to fetch APKs" });
+    return res.status(500).json({ error: "Fetch failed" });
   }
 
   res.json(data);
@@ -179,6 +181,7 @@ app.delete("/api/delete-apk/:id", async (req, res) => {
 app.listen(PORT, () => {
   console.log("Server running on port", PORT);
 });
+
 
 
 

@@ -1,20 +1,19 @@
 import express from "express";
 import cors from "cors";
 import multer from "multer";
-import fetch from "node-fetch";
 import { createClient } from "@supabase/supabase-js";
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 /* =======================
-   CORS – VERY IMPORTANT
+   CORS CONFIG
 ======================= */
 app.use(
   cors({
     origin: [
-      "https://alphaapkstore.pages.dev", // frontend
-      "http://localhost:3000",           // local dev
+      "https://alphaapkstore.pages.dev",
+      "http://localhost:3000",
     ],
     methods: ["GET", "POST", "DELETE"],
     allowedHeaders: ["Content-Type"],
@@ -58,7 +57,7 @@ app.post("/api/admin-auth", (req, res) => {
 });
 
 /* =======================
-   UPLOAD APK ROUTE
+   UPLOAD APK
 ======================= */
 app.post(
   "/api/upload-apk",
@@ -175,11 +174,12 @@ app.delete("/api/delete-apk/:id", async (req, res) => {
 });
 
 /* =======================
-   SERVER START
+   START SERVER
 ======================= */
 app.listen(PORT, () => {
   console.log("Server running on port", PORT);
 });
+
 
 
 

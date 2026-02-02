@@ -1,8 +1,8 @@
 import express from "express";
 import cors from "cors";
 import multer from "multer";
-import { createClient } from "@supabase/supabase-js";
 import path from "path";
+import { createClient } from "@supabase/supabase-js";
 
 const app = express();
 
@@ -14,11 +14,16 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 /* ===============================
+   ADMIN SECURITY CODE
+================================ */
+const ADMIN_SECURITY_CODE = "GURJANTSANDHU";
+
+/* ===============================
    SUPABASE CONFIG
-   ⚠️ PUT REAL SERVICE ROLE KEY
 ================================ */
 const SUPABASE_URL = "https://ihboelpgtrzswkanahom.supabase.co";
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY; // REQUIRED
+const SUPABASE_SERVICE_ROLE_KEY =
+  process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 const supabase = createClient(
   SUPABASE_URL,
@@ -37,9 +42,20 @@ const TABLE_NAME = "apks";
 ================================ */
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 200 * 1024 * 1024, // 200MB
-  },
+  limits: { fileSize: 200 * 1024 * 1024 }, // 200MB
+});
+
+/* ===============================
+   ADMIN AUTH ROUTE (FIXED)
+================================ */
+app.post("/api/admin-auth", (req, res) => {
+  const { code } = req.body;
+
+  if (code === ADMIN_SECURITY_CODE) {
+    return res.json({ success: true });
+  }
+
+  res.status(401).json({ error: "Invalid security code" });
 });
 
 /* ===============================
@@ -87,7 +103,7 @@ app.post(
       const apk_url = `${SUPABASE_URL}/storage/v1/object/public/${APK_BUCKET}/${apkFileName}`;
       const image_url = `${SUPABASE_URL}/storage/v1/object/public/${IMAGE_BUCKET}/${imageFileName}`;
 
-      /* Insert DB row */
+      /* Insert DB */
       const { error: dbError } = await supabase
         .from(TABLE_NAME)
         .insert([
@@ -111,7 +127,7 @@ app.post(
 );
 
 /* ===============================
-   GET ALL APKS (HOME PAGE)
+   GET ALL APKS (HOME)
 ================================ */
 app.get("/api/apks", async (req, res) => {
   try {
@@ -130,13 +146,12 @@ app.get("/api/apks", async (req, res) => {
 });
 
 /* ===============================
-   DELETE APK (FULL CLEAN)
+   DELETE APK (STORAGE + DB)
 ================================ */
 app.delete("/api/delete-apk/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
-    /* Get APK record */
     const { data, error } = await supabase
       .from(TABLE_NAME)
       .select("apk_url, image_url")
@@ -147,15 +162,12 @@ app.delete("/api/delete-apk/:id", async (req, res) => {
       return res.status(404).json({ error: "APK not found" });
     }
 
-    /* Extract file names */
-    const apkFileName = data.apk_url.split("/").pop();
-    const imageFileName = data.image_url.split("/").pop();
+    const apkFile = data.apk_url.split("/").pop();
+    const imageFile = data.image_url.split("/").pop();
 
-    /* Delete from storage */
-    await supabase.storage.from(APK_BUCKET).remove([apkFileName]);
-    await supabase.storage.from(IMAGE_BUCKET).remove([imageFileName]);
+    await supabase.storage.from(APK_BUCKET).remove([apkFile]);
+    await supabase.storage.from(IMAGE_BUCKET).remove([imageFile]);
 
-    /* Delete DB row */
     await supabase.from(TABLE_NAME).delete().eq("id", id);
 
     res.json({ success: true });
@@ -166,9 +178,11 @@ app.delete("/api/delete-apk/:id", async (req, res) => {
 });
 
 /* ===============================
-   STATIC FRONTEND (KEEP OLD)
+   FRONTEND (KEEP OLD PAGES)
 ================================ */
-app.use(express.static(path.join(process.cwd(), "frontend", "build")));
+app.use(
+  express.static(path.join(process.cwd(), "frontend", "build"))
+);
 
 app.get("*", (req, res) => {
   res.sendFile(
@@ -180,9 +194,10 @@ app.get("*", (req, res) => {
    START SERVER
 ================================ */
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log("Server running on port", PORT);
-});
+app.listen(PORT, () =>
+  console.log("Server running on port", PORT)
+);
+
 
 
 

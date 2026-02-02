@@ -1,7 +1,6 @@
 import express from "express";
 import cors from "cors";
 import multer from "multer";
-import path from "path";
 import { createClient } from "@supabase/supabase-js";
 
 const app = express();
@@ -25,6 +24,10 @@ const SUPABASE_URL = "https://ihboelpgtrzswkanahom.supabase.co";
 const SUPABASE_SERVICE_ROLE_KEY =
   process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+if (!SUPABASE_SERVICE_ROLE_KEY) {
+  console.error("❌ SUPABASE_SERVICE_ROLE_KEY missing");
+}
+
 const supabase = createClient(
   SUPABASE_URL,
   SUPABASE_SERVICE_ROLE_KEY
@@ -46,7 +49,7 @@ const upload = multer({
 });
 
 /* ===============================
-   ADMIN AUTH ROUTE (FIXED)
+   ADMIN AUTH
 ================================ */
 app.post("/api/admin-auth", (req, res) => {
   const { code } = req.body;
@@ -99,21 +102,13 @@ app.post(
 
       if (imageError) throw imageError;
 
-      /* Public URLs */
       const apk_url = `${SUPABASE_URL}/storage/v1/object/public/${APK_BUCKET}/${apkFileName}`;
       const image_url = `${SUPABASE_URL}/storage/v1/object/public/${IMAGE_BUCKET}/${imageFileName}`;
 
-      /* Insert DB */
       const { error: dbError } = await supabase
         .from(TABLE_NAME)
         .insert([
-          {
-            name,
-            description,
-            category,
-            apk_url,
-            image_url,
-          },
+          { name, description, category, apk_url, image_url },
         ]);
 
       if (dbError) throw dbError;
@@ -127,7 +122,7 @@ app.post(
 );
 
 /* ===============================
-   GET ALL APKS (HOME)
+   GET ALL APKS
 ================================ */
 app.get("/api/apks", async (req, res) => {
   try {
@@ -137,36 +132,37 @@ app.get("/api/apks", async (req, res) => {
       .order("id", { ascending: false });
 
     if (error) throw error;
-
     res.json(data);
   } catch (err) {
     console.error("FETCH ERROR:", err);
-    res.status(500).json({ error: "Failed to fetch APKs" });
+    res.status(500).json({ error: "Fetch failed" });
   }
 });
 
 /* ===============================
-   DELETE APK (STORAGE + DB)
+   DELETE APK
 ================================ */
 app.delete("/api/delete-apk/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from(TABLE_NAME)
       .select("apk_url, image_url")
       .eq("id", id)
       .single();
 
-    if (error || !data) {
-      return res.status(404).json({ error: "APK not found" });
+    if (!data) {
+      return res.status(404).json({ error: "Not found" });
     }
 
-    const apkFile = data.apk_url.split("/").pop();
-    const imageFile = data.image_url.split("/").pop();
+    await supabase.storage
+      .from(APK_BUCKET)
+      .remove([data.apk_url.split("/").pop()]);
 
-    await supabase.storage.from(APK_BUCKET).remove([apkFile]);
-    await supabase.storage.from(IMAGE_BUCKET).remove([imageFile]);
+    await supabase.storage
+      .from(IMAGE_BUCKET)
+      .remove([data.image_url.split("/").pop()]);
 
     await supabase.from(TABLE_NAME).delete().eq("id", id);
 
@@ -178,25 +174,13 @@ app.delete("/api/delete-apk/:id", async (req, res) => {
 });
 
 /* ===============================
-   FRONTEND (KEEP OLD PAGES)
-================================ */
-app.use(
-  express.static(path.join(process.cwd(), "frontend", "build"))
-);
-
-app.get("*", (req, res) => {
-  res.sendFile(
-    path.join(process.cwd(), "frontend", "build", "index.html")
-  );
-});
-
-/* ===============================
    START SERVER
 ================================ */
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () =>
-  console.log("Server running on port", PORT)
-);
+app.listen(PORT, () => {
+  console.log("✅ Backend API running on port", PORT);
+});
+
 
 
 

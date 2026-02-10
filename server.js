@@ -1,163 +1,232 @@
+// ======================
+// Alpha APK Store Backend
+// ======================
+
 const express = require("express");
 const cors = require("cors");
 const multer = require("multer");
-const path = require("path");
-const slugify = require("slugify");
 const { createClient } = require("@supabase/supabase-js");
 
 const app = express();
-app.use(cors());
+const PORT = process.env.PORT || 5000;
+
 app.use(express.json());
 
-/* ===========================
-   SUPABASE CONFIG
-=========================== */
-const supabase = createClient(
-  "https://ihboelpgtrzswkanahom.supabase.co",
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImloYm9lbHBndHJ6c3drYW5haG9tIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2OTc3OTc4MiwiZXhwIjoyMDg1MzU1NzgyfQ.6fjjeTKYQGe6Ap9PjOHx7Umnyi5DWe0PJmugc1l6d-4"
+app.use(
+  cors({
+    origin: [
+      "https://alphaapkstore.pages.dev",
+      "http://localhost:3000"
+    ],
+    credentials: true
+  })
 );
 
-/* ===========================
-   MEMORY DB (JSON STYLE)
-=========================== */
-let apks = [];
+// ======================
+// SUPABASE CONFIG
+// ======================
 
-/* ===========================
-   MULTER MEMORY STORAGE
-=========================== */
-const storage = multer.memoryStorage();
-const upload = multer({ storage });
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
-/* ===========================
-   ADMIN SECURITY CODE
-=========================== */
+const APK_BUCKET = "apks";
+const IMAGE_BUCKET = "images";
+const TABLE = "apks";
+
+// ======================
+// ADMIN SECURITY
+// ======================
+
+const ADMIN_CODE = "GURJANTSANDHU";
+
 app.post("/api/admin-auth", (req, res) => {
-  const { code } = req.body;
-
-  if (code === "GURJANTSANDHU") {
+  if (req.body.code === ADMIN_CODE) {
     return res.json({ success: true });
   }
-
   res.status(401).json({ success: false });
 });
 
-/* ===========================
-   UPLOAD APK
-=========================== */
-app.post(
-  "/api/upload-apk",
-  upload.fields([
-    { name: "apkFile", maxCount: 1 },
-    { name: "imageFile", maxCount: 1 }
-  ]),
-  async (req, res) => {
-    try {
-      const { name, description, category } = req.body;
+// ======================
+// MULTER MEMORY STORAGE
+// ======================
 
-      const apkFile = req.files.apkFile[0];
-      const imageFile = req.files.imageFile[0];
+const storage = multer.memoryStorage();
 
-      const id = Date.now();
+const upload = multer({
+  storage,
+  limits: { fileSize: 200 * 1024 * 1024 }
+});
 
-      const slug = slugify(name + "-" + id, {
-        lower: true,
-        strict: true
+const uploadFields = upload.fields([
+  { name: "apkFile", maxCount: 1 },
+  { name: "imageFile", maxCount: 1 }
+]);
+
+// ======================
+// SLUG FUNCTION
+// ======================
+
+function makeSlug(name) {
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/(^-|-$)+/g, "") +
+    "-" +
+    Date.now()
+  );
+}
+
+// ======================
+// GET ALL APKS
+// ======================
+
+app.get("/api/apks", async (req, res) => {
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (error) return res.status(500).json(error);
+  res.json(data);
+});
+
+// ======================
+// GET SINGLE APK
+// ======================
+
+app.get("/api/apk/:slug", async (req, res) => {
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select("*")
+    .eq("slug", req.params.slug)
+    .single();
+
+  if (error || !data) {
+    return res.status(404).json({ error: "Not found" });
+  }
+
+  res.json(data);
+});
+
+// ======================
+// UPLOAD APK
+// ======================
+
+app.post("/api/upload-apk", uploadFields, async (req, res) => {
+  try {
+    const { name, description, category } = req.body;
+
+    const apkFile = req.files?.apkFile?.[0];
+    const imageFile = req.files?.imageFile?.[0];
+
+    if (!apkFile || !imageFile) {
+      return res.status(400).json({ error: "Files missing" });
+    }
+
+    const slug = makeSlug(name);
+
+    const apkPath = `${Date.now()}-${apkFile.originalname}`;
+    const imagePath = `${Date.now()}-${imageFile.originalname}`;
+
+    // upload apk
+    await supabase.storage
+      .from(APK_BUCKET)
+      .upload(apkPath, apkFile.buffer, {
+        contentType: apkFile.mimetype
       });
 
-      /* UPLOAD APK */
-      const apkPath = `apks/${id}-${apkFile.originalname}`;
+    // upload image
+    await supabase.storage
+      .from(IMAGE_BUCKET)
+      .upload(imagePath, imageFile.buffer, {
+        contentType: imageFile.mimetype
+      });
 
-      await supabase.storage
-        .from("apks")
-        .upload(apkPath, apkFile.buffer, {
-          contentType: apkFile.mimetype
-        });
+    const apkUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/${APK_BUCKET}/${apkPath}`;
+    const imageUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/${IMAGE_BUCKET}/${imagePath}`;
 
-      const apkUrl =
-        "https://ihboelpgtrzswkanahom.supabase.co/storage/v1/object/public/apks/" +
-        apkPath;
-
-      /* UPLOAD IMAGE */
-      const imagePath = `images/${id}-${imageFile.originalname}`;
-
-      await supabase.storage
-        .from("images")
-        .upload(imagePath, imageFile.buffer, {
-          contentType: imageFile.mimetype
-        });
-
-      const imageUrl =
-        "https://ihboelpgtrzswkanahom.supabase.co/storage/v1/object/public/images/" +
-        imagePath;
-
-      const newApk = {
-        id,
+    await supabase.from(TABLE).insert([
+      {
         name,
-        slug,
         description,
         category,
-        apkUrl,
-        imageUrl,
-        createdAt: new Date().toISOString()
-      };
+        apk_url: apkUrl,
+        image_url: imageUrl,
+        slug,
+        created_at: new Date()
+      }
+    ]);
 
-      apks.unshift(newApk);
-
-      res.json({ success: true, apk: newApk });
-    } catch (err) {
-  console.error("UPLOAD ERROR:", err);
-  res.status(500).json({ error: err.message || "Upload failed" });
-}
+    res.json({ success: true });
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ error: "Upload failed" });
   }
-);
-
-/* ===========================
-   GET ALL APKS
-=========================== */
-app.get("/api/apks", (req, res) => {
-  res.json(apks);
 });
 
-/* ===========================
-   GET SINGLE APK (DETAIL PAGE)
-=========================== */
-app.get("/api/apk/:id", (req, res) => {
-  const apk = apks.find(a => a.id == req.params.id);
-  res.json(apk || {});
+// ======================
+// DELETE APK
+// ======================
+
+app.delete("/api/delete-apk/:slug", async (req, res) => {
+  try {
+    const { data } = await supabase
+      .from(TABLE)
+      .select("*")
+      .eq("slug", req.params.slug)
+      .single();
+
+    if (!data) return res.status(404).json({ error: "Not found" });
+
+    const apkFile = data.apk_url.split("/").pop();
+    const imageFile = data.image_url.split("/").pop();
+
+    await supabase.storage.from(APK_BUCKET).remove([apkFile]);
+    await supabase.storage.from(IMAGE_BUCKET).remove([imageFile]);
+
+    await supabase.from(TABLE).delete().eq("slug", req.params.slug);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ error: "Delete failed" });
+  }
 });
 
-/* ===========================
-   DELETE APK
-=========================== */
-app.delete("/api/delete-apk/:id", (req, res) => {
-  apks = apks.filter(a => a.id != req.params.id);
-  res.json({ success: true });
-});
+// ======================
+// SEO SITEMAP
+// ======================
 
-/* ===========================
-   AUTO SITEMAP
-=========================== */
-app.get("/sitemap.xml", (req, res) => {
-  let urls = apks
+app.get("/sitemap.xml", async (req, res) => {
+  const { data } = await supabase.from(TABLE).select("slug");
+
+  let urls = data
     .map(
-      a =>
-        `<url><loc>https://alphaapkstore.xyz/apk/${a.id}</loc></url>`
+      (a) =>
+        `<url><loc>https://alphaapkstore.xyz/apk/${a.slug}</loc></url>`
     )
     .join("");
 
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls}
+</urlset>`;
+
   res.header("Content-Type", "application/xml");
-  res.send(
-    `<?xml version="1.0" encoding="UTF-8"?><urlset>${urls}</urlset>`
-  );
+  res.send(xml);
 });
 
-/* ===========================
-   START SERVER
-=========================== */
-const PORT = process.env.PORT || 5000;
+// ======================
+// START SERVER
+// ======================
+
 app.listen(PORT, () => {
-  console.log("Alpha APK Server Running on", PORT);
+  console.log("Server running on port " + PORT);
 });
+
 
 
 

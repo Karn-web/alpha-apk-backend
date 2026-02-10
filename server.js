@@ -105,9 +105,9 @@ app.post(
 
       res.json({ success: true, apk: newApk });
     } catch (err) {
-      console.error("UPLOAD ERROR:", err);
-      res.status(500).json({ error: "Upload failed" });
-    }
+  console.error("UPLOAD ERROR:", err);
+  res.status(500).json({ error: err.message || "Upload failed" });
+}
   }
 );
 

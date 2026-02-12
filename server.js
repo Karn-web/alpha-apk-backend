@@ -78,6 +78,10 @@ app.post("/api/upload-apk", uploadFields, async (req, res) => {
   try {
     const { name, description, category } = req.body;
 
+    if (!name) {
+      return res.status(400).json({ error: "Name required" });
+    }
+
     const apkFile = req.files?.apkFile?.[0];
     const imageFile = req.files?.imageFile?.[0];
 
@@ -90,37 +94,58 @@ app.post("/api/upload-apk", uploadFields, async (req, res) => {
     const apkPath = `${Date.now()}-${apkFile.originalname}`;
     const imagePath = `${Date.now()}-${imageFile.originalname}`;
 
-    await supabase.storage
+    // upload apk
+    const { error: apkUploadError } = await supabase.storage
       .from(APK_BUCKET)
       .upload(apkPath, apkFile.buffer, {
         contentType: apkFile.mimetype
       });
 
-    await supabase.storage
+    if (apkUploadError) {
+      console.log("APK UPLOAD ERROR:", apkUploadError);
+      return res.status(500).json({ error: "APK upload failed" });
+    }
+
+    // upload image
+    const { error: imageUploadError } = await supabase.storage
       .from(IMAGE_BUCKET)
       .upload(imagePath, imageFile.buffer, {
         contentType: imageFile.mimetype
       });
 
+    if (imageUploadError) {
+      console.log("IMAGE UPLOAD ERROR:", imageUploadError);
+      return res.status(500).json({ error: "Image upload failed" });
+    }
+
     const apkUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/${APK_BUCKET}/${apkPath}`;
     const imageUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/${IMAGE_BUCKET}/${imagePath}`;
 
-    await supabase.from(TABLE).insert([
-      {
-        name,
-        description,
-        category,
-        apk_url: apkUrl,
-        image_url: imageUrl,
-        slug,
-        created_at: new Date()
-      }
-    ]);
+    // insert DB row
+    const { data, error: insertError } = await supabase
+      .from(TABLE)
+      .insert([
+        {
+          name,
+          description,
+          category,
+          apk_url: apkUrl,
+          image_url: imageUrl,
+          slug,
+          created_at: new Date().toISOString()
+        }
+      ])
+      .select();
 
-    res.json({ success: true });
+    if (insertError) {
+      console.log("SUPABASE INSERT ERROR:", insertError);
+      return res.status(500).json({ error: insertError.message });
+    }
+
+    res.json({ success: true, data });
 
   } catch (err) {
-    console.log(err);
+    console.log("UPLOAD ERROR:", err);
     res.status(500).json({ error: "Upload failed" });
   }
 });
@@ -140,8 +165,9 @@ app.get("/api/apks", async (req, res) => {
     if (error) throw error;
 
     res.json(data);
+
   } catch (err) {
-    console.log(err);
+    console.log("FETCH ERROR:", err);
     res.status(500).json({ error: "Fetch failed" });
   }
 });
@@ -165,7 +191,7 @@ app.delete("/api/apks/:id", async (req, res) => {
     res.json({ success: true });
 
   } catch (err) {
-    console.log(err);
+    console.log("DELETE ERROR:", err);
     res.status(500).json({ error: "Delete failed" });
   }
 });
@@ -193,4 +219,5 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log("Server running on port", PORT);
 });
+
 

@@ -1,5 +1,4 @@
 const express = require("express");
-const multer = require("multer");
 const cors = require("cors");
 const path = require("path");
 
@@ -12,9 +11,20 @@ try {
 const { createClient } = require("@supabase/supabase-js");
 
 const app = express();
-app.use(cors());
-app.use(express.json());
 
+// ======================
+// CORS
+// ======================
+app.use(cors({
+  origin: [
+    "https://www.alphaapkstore.xyz",
+    "http://localhost:3000"
+  ],
+  methods: ["GET", "POST", "DELETE"],
+  credentials: true
+}));
+
+app.use(express.json({ limit: "50mb" }));
 
 // ======================
 // SUPABASE
@@ -26,9 +36,6 @@ const supabase = createClient(
 );
 
 const TABLE = "apks";
-const APK_BUCKET = "apk-files";
-const IMAGE_BUCKET = "apk-images";
-
 
 // ======================
 // SECURITY CODE
@@ -43,21 +50,6 @@ app.post("/api/admin-auth", (req, res) => {
   res.status(401).json({ success: false });
 });
 
-
-// ======================
-// MULTER CONFIG
-// ======================
-
-const storage = multer.memoryStorage();
-
-const upload = multer({ storage });
-
-const uploadFields = upload.fields([
-  { name: "apkFile", maxCount: 1 },
-  { name: "imageFile", maxCount: 1 }
-]);
-
-
 // ======================
 // SLUG MAKER
 // ======================
@@ -69,77 +61,38 @@ function makeSlug(text) {
     .replace(/(^-|-$)/g, "");
 }
 
-
 // ======================
-// UPLOAD APK
+// UPLOAD APK (NOW URL BASED)
 // ======================
 
-app.post("/api/upload-apk", uploadFields, async (req, res) => {
+app.post("/api/upload-apk", async (req, res) => {
   try {
-    const { name, description, category } = req.body;
+    const { name, description, category, apk_url, image_url } = req.body;
 
-    if (!name) {
-      return res.status(400).json({ error: "Name required" });
-    }
-
-    const apkFile = req.files?.apkFile?.[0];
-    const imageFile = req.files?.imageFile?.[0];
-
-    if (!apkFile || !imageFile) {
-      return res.status(400).json({ error: "Files missing" });
+    if (!name || !apk_url || !image_url) {
+      return res.status(400).json({ error: "Missing fields" });
     }
 
     const slug = makeSlug(name);
 
-    const apkPath = `${Date.now()}-${apkFile.originalname}`;
-    const imagePath = `${Date.now()}-${imageFile.originalname}`;
-
-    // upload apk
-    const { error: apkUploadError } = await supabase.storage
-      .from(APK_BUCKET)
-      .upload(apkPath, apkFile.buffer, {
-        contentType: apkFile.mimetype
-      });
-
-    if (apkUploadError) {
-      console.log("APK UPLOAD ERROR:", apkUploadError);
-      return res.status(500).json({ error: "APK upload failed" });
-    }
-
-    // upload image
-    const { error: imageUploadError } = await supabase.storage
-      .from(IMAGE_BUCKET)
-      .upload(imagePath, imageFile.buffer, {
-        contentType: imageFile.mimetype
-      });
-
-    if (imageUploadError) {
-      console.log("IMAGE UPLOAD ERROR:", imageUploadError);
-      return res.status(500).json({ error: "Image upload failed" });
-    }
-
-    const apkUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/${APK_BUCKET}/${apkPath}`;
-    const imageUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/${IMAGE_BUCKET}/${imagePath}`;
-
-    // insert DB row
-    const { data, error: insertError } = await supabase
+    const { data, error } = await supabase
       .from(TABLE)
       .insert([
         {
           name,
           description,
           category,
-          apk_url: apkUrl,
-          image_url: imageUrl,
+          apk_url,
+          image_url,
           slug,
           created_at: new Date().toISOString()
         }
       ])
       .select();
 
-    if (insertError) {
-      console.log("SUPABASE INSERT ERROR:", insertError);
-      return res.status(500).json({ error: insertError.message });
+    if (error) {
+      console.log("INSERT ERROR:", error);
+      return res.status(500).json({ error: error.message });
     }
 
     res.json({ success: true, data });
@@ -150,9 +103,8 @@ app.post("/api/upload-apk", uploadFields, async (req, res) => {
   }
 });
 
-
 // ======================
-// GET ALL APKS
+// GET APKS
 // ======================
 
 app.get("/api/apks", async (req, res) => {
@@ -172,12 +124,11 @@ app.get("/api/apks", async (req, res) => {
   }
 });
 
-
 // ======================
 // DELETE APK
 // ======================
 
-app.delete("/api/apks/:id", async (req, res) => {
+app.delete("/api/delete-apk/:id", async (req, res) => {
   try {
     const id = req.params.id;
 
@@ -196,7 +147,6 @@ app.delete("/api/apks/:id", async (req, res) => {
   }
 });
 
-
 // ======================
 // SERVE FRONTEND
 // ======================
@@ -209,7 +159,6 @@ app.get("*", (req, res) => {
   res.sendFile(path.join(buildPath, "index.html"));
 });
 
-
 // ======================
 // START SERVER
 // ======================
@@ -219,5 +168,3 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log("Server running on port", PORT);
 });
-
-

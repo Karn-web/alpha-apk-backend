@@ -13,16 +13,21 @@ const { createClient } = require("@supabase/supabase-js");
 const app = express();
 
 // ======================
-// CORS
+// ✅ CORS FIXED (IMPORTANT)
 // ======================
+
 app.use(cors({
   origin: [
     "https://www.alphaapkstore.xyz",
+    "https://alphaapkstore.xyz",   // ✅ FIXED (no www)
     "http://localhost:3000"
   ],
-  methods: ["GET", "POST", "DELETE"],
+  methods: ["GET", "POST", "DELETE", "OPTIONS"],
   credentials: true
 }));
+
+// Handle preflight requests
+app.options("*", cors());
 
 app.use(express.json({ limit: "50mb" }));
 
@@ -38,7 +43,7 @@ const supabase = createClient(
 const TABLE = "apks";
 
 // ======================
-// SECURITY CODE
+// SECURITY CODE (UNCHANGED)
 // ======================
 
 const ADMIN_CODE = "GURJANTSANDHU";
@@ -51,7 +56,7 @@ app.post("/api/admin-auth", (req, res) => {
 });
 
 // ======================
-// SLUG MAKER
+// SLUG MAKER (UNCHANGED)
 // ======================
 
 function makeSlug(text) {
@@ -62,7 +67,7 @@ function makeSlug(text) {
 }
 
 // ======================
-// UPLOAD APK (NOW URL BASED)
+// UPLOAD APK (URL BASED)
 // ======================
 
 app.post("/api/upload-apk", async (req, res) => {
@@ -148,7 +153,7 @@ app.delete("/api/delete-apk/:id", async (req, res) => {
 });
 
 // ======================
-// SERVE FRONTEND
+// SERVE FRONTEND (UNCHANGED)
 // ======================
 
 const buildPath = path.join(__dirname, "../frontend/build");

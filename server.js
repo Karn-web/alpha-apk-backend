@@ -1,5 +1,3 @@
-// backend/server.js
-
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
@@ -17,7 +15,6 @@ const app = express();
 /* ======================
    CORS
 ====================== */
-
 app.use(
   cors({
     origin: [
@@ -54,7 +51,10 @@ app.post("/api/admin-auth", (req, res) => {
     return res.json({ success: true });
   }
 
-  res.status(401).json({ success: false });
+  return res.status(401).json({
+    success: false,
+    message: "Invalid security code",
+  });
 });
 
 /* ======================
@@ -62,8 +62,9 @@ app.post("/api/admin-auth", (req, res) => {
 ====================== */
 
 function makeSlug(text) {
-  return text
+  return String(text || "")
     .toLowerCase()
+    .trim()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
 }
@@ -79,26 +80,17 @@ app.post("/api/upload-apk", async (req, res) => {
       description,
       category,
       apk_url,
-      image_url,
+      image_url
     } = req.body;
 
     if (!name || !apk_url || !image_url) {
       return res.status(400).json({
-        error: "Missing fields",
+        success: false,
+        error: "Missing required fields",
       });
     }
 
     const slug = makeSlug(name);
-
-    // full safe image url
-    let finalImageUrl = image_url;
-
-    if (
-      image_url &&
-      !image_url.startsWith("http")
-    ) {
-      finalImageUrl = `${process.env.SUPABASE_URL}/storage/v1/object/public/apk-images/${image_url}`;
-    }
 
     const { data, error } = await supabase
       .from(TABLE)
@@ -108,7 +100,7 @@ app.post("/api/upload-apk", async (req, res) => {
           description,
           category,
           apk_url,
-          image_url: finalImageUrl,
+          image_url,
           slug,
           created_at: new Date().toISOString(),
         },
@@ -118,25 +110,27 @@ app.post("/api/upload-apk", async (req, res) => {
     if (error) {
       console.log("INSERT ERROR:", error);
       return res.status(500).json({
+        success: false,
         error: error.message,
       });
     }
 
-    res.json({
+    return res.json({
       success: true,
       data,
     });
   } catch (err) {
     console.log("UPLOAD ERROR:", err);
 
-    res.status(500).json({
+    return res.status(500).json({
+      success: false,
       error: "Upload failed",
     });
   }
 });
 
 /* ======================
-   GET APKS
+   GET ALL APKS
 ====================== */
 
 app.get("/api/apks", async (req, res) => {
@@ -144,23 +138,23 @@ app.get("/api/apks", async (req, res) => {
     const { data, error } = await supabase
       .from(TABLE)
       .select("*")
-      .order("created_at", {
-        ascending: false,
-      });
+      .order("created_at", { ascending: false });
 
     if (error) {
       console.log("FETCH ERROR:", error);
 
       return res.status(500).json({
+        success: false,
         error: error.message,
       });
     }
 
-    res.json(data || []);
+    return res.json(data || []);
   } catch (err) {
-    console.log("FETCH ERROR:", err);
+    console.log("SERVER FETCH ERROR:", err);
 
-    res.status(500).json({
+    return res.status(500).json({
+      success: false,
       error: "Fetch failed",
     });
   }
@@ -179,15 +173,24 @@ app.delete("/api/delete-apk/:id", async (req, res) => {
       .delete()
       .eq("id", id);
 
-    if (error) throw error;
+    if (error) {
+      console.log("DELETE ERROR:", error);
 
-    res.json({
+      return res.status(500).json({
+        success: false,
+        error: error.message,
+      });
+    }
+
+    return res.json({
       success: true,
+      message: "APK deleted successfully",
     });
   } catch (err) {
-    console.log("DELETE ERROR:", err);
+    console.log("DELETE SERVER ERROR:", err);
 
-    res.status(500).json({
+    return res.status(500).json({
+      success: false,
       error: "Delete failed",
     });
   }
@@ -197,19 +200,24 @@ app.delete("/api/delete-apk/:id", async (req, res) => {
    SERVE FRONTEND
 ====================== */
 
-const buildPath = path.join(
-  __dirname,
-  "..",
-  "frontend",
-  "build"
-);
+const buildPath = path.join(__dirname, "../frontend/build");
 
+/* Static files FIRST */
 app.use(express.static(buildPath));
 
+/* Force sitemap.xml */
+app.get("/sitemap.xml", (req, res) => {
+  res.sendFile(path.join(buildPath, "sitemap.xml"));
+});
+
+/* Force robots.txt */
+app.get("/robots.txt", (req, res) => {
+  res.sendFile(path.join(buildPath, "robots.txt"));
+});
+
+/* React routes LAST */
 app.get("*", (req, res) => {
-  res.sendFile(
-    path.join(buildPath, "index.html")
-  );
+  res.sendFile(path.join(buildPath, "index.html"));
 });
 
 /* ======================
@@ -219,8 +227,5 @@ app.get("*", (req, res) => {
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
-  console.log(
-    "Server running on port",
-    PORT
-  );
+  console.log("Server running on port", PORT);
 });

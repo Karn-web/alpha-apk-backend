@@ -5,16 +5,16 @@ const path = require("path");
 try {
   require("dotenv").config();
 } catch {
-  console.log("dotenv not installed — using render env");
+  console.log("dotenv not installed — using environment variables");
 }
 
 const { createClient } = require("@supabase/supabase-js");
 
 const app = express();
 
-/* ======================
-   CORS
-====================== */
+// ====================================
+// CORS (keep all old features + fixed)
+// ====================================
 app.use(
   cors({
     origin: [
@@ -29,10 +29,9 @@ app.use(
 
 app.use(express.json({ limit: "50mb" }));
 
-/* ======================
-   SUPABASE
-====================== */
-
+// ====================================
+// SUPABASE
+// ====================================
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -40,27 +39,35 @@ const supabase = createClient(
 
 const TABLE = "apks";
 
-/* ======================
-   SECURITY CODE
-====================== */
-
+// ====================================
+// ADMIN SECURITY CODE
+// ====================================
 const ADMIN_CODE = "GURJANTSANDHU";
 
 app.post("/api/admin-auth", (req, res) => {
-  if (req.body.code === ADMIN_CODE) {
-    return res.json({ success: true });
-  }
+  try {
+    const { code } = req.body;
 
-  return res.status(401).json({
-    success: false,
-    message: "Invalid security code",
-  });
+    if (code === ADMIN_CODE) {
+      return res.json({ success: true });
+    }
+
+    return res.status(401).json({
+      success: false,
+      message: "Invalid security code",
+    });
+  } catch (error) {
+    console.log("ADMIN AUTH ERROR:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Server error",
+    });
+  }
 });
 
-/* ======================
-   SLUG MAKER
-====================== */
-
+// ====================================
+// SLUG MAKER
+// ====================================
 function makeSlug(text) {
   return String(text || "")
     .toLowerCase()
@@ -69,10 +76,9 @@ function makeSlug(text) {
     .replace(/(^-|-$)/g, "");
 }
 
-/* ======================
-   UPLOAD APK (URL BASED)
-====================== */
-
+// ====================================
+// UPLOAD APK
+// ====================================
 app.post("/api/upload-apk", async (req, res) => {
   try {
     const {
@@ -80,35 +86,45 @@ app.post("/api/upload-apk", async (req, res) => {
       description,
       category,
       apk_url,
-      image_url
+      image_url,
+      version,
+      size,
+      updated_date,
+      rating,
+      screenshots,
     } = req.body;
 
     if (!name || !apk_url || !image_url) {
       return res.status(400).json({
         success: false,
-        error: "Missing required fields",
+        error: "Name, APK URL and Image URL are required",
       });
     }
 
     const slug = makeSlug(name);
 
+    const insertData = {
+      name,
+      description: description || "",
+      category: category || "General",
+      apk_url,
+      image_url,
+      version: version || "Latest",
+      size: size || "N/A",
+      updated_date: updated_date || "Recently",
+      rating: rating || "4.5",
+      screenshots: Array.isArray(screenshots) ? screenshots : [],
+      slug,
+      created_at: new Date().toISOString(),
+    };
+
     const { data, error } = await supabase
       .from(TABLE)
-      .insert([
-        {
-          name,
-          description,
-          category,
-          apk_url,
-          image_url,
-          slug,
-          created_at: new Date().toISOString(),
-        },
-      ])
+      .insert([insertData])
       .select();
 
     if (error) {
-      console.log("INSERT ERROR:", error);
+      console.log("UPLOAD INSERT ERROR:", error);
       return res.status(500).json({
         success: false,
         error: error.message,
@@ -119,9 +135,8 @@ app.post("/api/upload-apk", async (req, res) => {
       success: true,
       data,
     });
-  } catch (err) {
-    console.log("UPLOAD ERROR:", err);
-
+  } catch (error) {
+    console.log("UPLOAD ERROR:", error);
     return res.status(500).json({
       success: false,
       error: "Upload failed",
@@ -129,10 +144,9 @@ app.post("/api/upload-apk", async (req, res) => {
   }
 });
 
-/* ======================
-   GET ALL APKS
-====================== */
-
+// ====================================
+// GET ALL APKS
+// ====================================
 app.get("/api/apks", async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -142,17 +156,15 @@ app.get("/api/apks", async (req, res) => {
 
     if (error) {
       console.log("FETCH ERROR:", error);
-
       return res.status(500).json({
         success: false,
         error: error.message,
       });
     }
 
-    return res.json(data || []);
-  } catch (err) {
-    console.log("SERVER FETCH ERROR:", err);
-
+    return res.json(Array.isArray(data) ? data : []);
+  } catch (error) {
+    console.log("GET APKS ERROR:", error);
     return res.status(500).json({
       success: false,
       error: "Fetch failed",
@@ -160,13 +172,19 @@ app.get("/api/apks", async (req, res) => {
   }
 });
 
-/* ======================
-   DELETE APK
-====================== */
-
+// ====================================
+// DELETE APK
+// ====================================
 app.delete("/api/delete-apk/:id", async (req, res) => {
   try {
-    const id = req.params.id;
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        error: "APK id required",
+      });
+    }
 
     const { error } = await supabase
       .from(TABLE)
@@ -175,20 +193,15 @@ app.delete("/api/delete-apk/:id", async (req, res) => {
 
     if (error) {
       console.log("DELETE ERROR:", error);
-
       return res.status(500).json({
         success: false,
         error: error.message,
       });
     }
 
-    return res.json({
-      success: true,
-      message: "APK deleted successfully",
-    });
-  } catch (err) {
-    console.log("DELETE SERVER ERROR:", err);
-
+    return res.json({ success: true });
+  } catch (error) {
+    console.log("DELETE SERVER ERROR:", error);
     return res.status(500).json({
       success: false,
       error: "Delete failed",
@@ -196,36 +209,42 @@ app.delete("/api/delete-apk/:id", async (req, res) => {
   }
 });
 
-/* ======================
-   SERVE FRONTEND
-====================== */
+// ====================================
+// SIMPLE SEO FILES
+// ====================================
+app.get("/robots.txt", (req, res) => {
+  res.type("text/plain");
+  res.send(`User-agent: *\nAllow: /\n\nSitemap: https://alphaapkstore.xyz/sitemap.xml`);
+});
 
+app.get("/sitemap.xml", (req, res) => {
+  res.header("Content-Type", "application/xml");
+  res.send(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://alphaapkstore.xyz/</loc><priority>1.0</priority></url>
+  <url><loc>https://alphaapkstore.xyz/about</loc><priority>0.8</priority></url>
+  <url><loc>https://alphaapkstore.xyz/contact</loc><priority>0.8</priority></url>
+  <url><loc>https://alphaapkstore.xyz/privacy-policy</loc><priority>0.7</priority></url>
+  <url><loc>https://alphaapkstore.xyz/terms</loc><priority>0.7</priority></url>
+</urlset>`);
+});
+
+// ====================================
+// SERVE FRONTEND BUILD
+// ====================================
 const buildPath = path.join(__dirname, "../frontend/build");
 
-/* Static files FIRST */
 app.use(express.static(buildPath));
 
-/* Force sitemap.xml */
-app.get("/sitemap.xml", (req, res) => {
-  res.sendFile(path.join(buildPath, "sitemap.xml"));
-});
-
-/* Force robots.txt */
-app.get("/robots.txt", (req, res) => {
-  res.sendFile(path.join(buildPath, "robots.txt"));
-});
-
-/* React routes LAST */
 app.get("*", (req, res) => {
   res.sendFile(path.join(buildPath, "index.html"));
 });
 
-/* ======================
-   START SERVER
-====================== */
-
+// ====================================
+// START SERVER
+// ====================================
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
-  console.log("Server running on port", PORT);
+  console.log(`Server running on port ${PORT}`);
 });

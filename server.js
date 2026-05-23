@@ -146,7 +146,18 @@ app.post("/api/upload-apk", async (req, res) => {
 // ====================================
 // GET ALL APKS
 // ====================================
+app.options("/api/apks", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "https://www.alphaapkstore.xyz");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  return res.sendStatus(200);
+});
+
 app.get("/api/apks", async (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "https://www.alphaapkstore.xyz");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+
   try {
     const { data, error } = await supabase
       .from(TABLE)
@@ -170,7 +181,6 @@ app.get("/api/apks", async (req, res) => {
     });
   }
 });
-
 // ====================================
 // DELETE APK
 // ====================================

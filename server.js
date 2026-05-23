@@ -13,13 +13,33 @@ const { createClient } = require("@supabase/supabase-js");
 const app = express();
 
 // ====================================
+// FORCE SINGLE DOMAIN (SEO FIX)
+// ====================================
+app.set("trust proxy", true);
+
+app.use((req, res, next) => {
+  const host = req.headers.host;
+  const proto = req.headers["x-forwarded-proto"] || req.protocol;
+
+  const canonicalHost = "www.alphaapkstore.xyz";
+
+  if (host !== canonicalHost || proto !== "https") {
+    return res.redirect(
+      301,
+      `https://${canonicalHost}${req.originalUrl}`
+    );
+  }
+
+  next();
+});
+
+// ====================================
 // CORS (keep all old features + fixed)
 // ====================================
 app.use(
   cors({
-    origin: [
-      "https://alphaapkstore.xyz",
-      "https://www.alphaapkstore.xyz",
+    origin: [    
+     "https://www.alphaapkstore.xyz",
       "http://localhost:3000",
     ],
     methods: ["GET", "POST", "DELETE", "OPTIONS"],

@@ -12,16 +12,14 @@ const { createClient } = require("@supabase/supabase-js");
 
 const app = express();
 
-// TRUST RENDER PROXY
-app.set("trust proxy", true);
-
-// CORS FIRST — IMPORTANT
+// ====================================
+// CORS (keep all old features + fixed)
+// ====================================
 app.use(
   cors({
     origin: [
       "https://alphaapkstore.xyz",
       "https://www.alphaapkstore.xyz",
-      "https://alpha-apk-backend.onrender.com",
       "http://localhost:3000",
     ],
     methods: ["GET", "POST", "DELETE", "OPTIONS"],
@@ -29,53 +27,23 @@ app.use(
   })
 );
 
-app.options("*", cors());
-
 app.use(express.json({ limit: "50mb" }));
 
-// REDIRECT ONLY WEBSITE DOMAINS, NOT RENDER API
-app.use((req, res, next) => {
-  const host = req.headers.host || "";
-  const proto = req.headers["x-forwarded-proto"] || req.protocol;
-
-  const canonicalHost = "www.alphaapkstore.xyz";
-
-  const isWebsiteDomain =
-    host === "alphaapkstore.xyz" || host === "www.alphaapkstore.xyz";
-
-  if (
-    isWebsiteDomain &&
-    (host !== canonicalHost || proto !== "https")
-  ) {
-    return res.redirect(301, `https://${canonicalHost}${req.originalUrl}`);
-  }
-
-  next();
-});
-
+// ====================================
 // SUPABASE
+// ====================================
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
 const TABLE = "apks";
+
+// ====================================
+// ADMIN SECURITY CODE
+// ====================================
 const ADMIN_CODE = "GURJANTSANDHU";
 
-function makeSlug(text) {
-  return String(text || "")
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)/g, "");
-}
-
-// HEALTH CHECK
-app.get("/api/health", (req, res) => {
-  res.json({ success: true, message: "Backend working" });
-});
-
-// ADMIN AUTH
 app.post("/api/admin-auth", (req, res) => {
   try {
     const { code } = req.body;
@@ -97,7 +65,20 @@ app.post("/api/admin-auth", (req, res) => {
   }
 });
 
+// ====================================
+// SLUG MAKER
+// ====================================
+function makeSlug(text) {
+  return String(text || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+// ====================================
 // UPLOAD APK
+// ====================================
 app.post("/api/upload-apk", async (req, res) => {
   try {
     const {
@@ -163,7 +144,9 @@ app.post("/api/upload-apk", async (req, res) => {
   }
 });
 
+// ====================================
 // GET ALL APKS
+// ====================================
 app.get("/api/apks", async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -189,7 +172,9 @@ app.get("/api/apks", async (req, res) => {
   }
 });
 
+// ====================================
 // DELETE APK
+// ====================================
 app.delete("/api/delete-apk/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -201,7 +186,10 @@ app.delete("/api/delete-apk/:id", async (req, res) => {
       });
     }
 
-    const { error } = await supabase.from(TABLE).delete().eq("id", id);
+    const { error } = await supabase
+      .from(TABLE)
+      .delete()
+      .eq("id", id);
 
     if (error) {
       console.log("DELETE ERROR:", error);
@@ -221,36 +209,40 @@ app.delete("/api/delete-apk/:id", async (req, res) => {
   }
 });
 
-// SEO FILES
+// ====================================
+// SIMPLE SEO FILES
+// ====================================
 app.get("/robots.txt", (req, res) => {
   res.type("text/plain");
-  res.send(
-    `User-agent: *\nAllow: /\n\nSitemap: https://www.alphaapkstore.xyz/sitemap.xml`
-  );
+  res.send(`User-agent: *\nAllow: /\n\nSitemap: https://alphaapkstore.xyz/sitemap.xml`);
 });
 
 app.get("/sitemap.xml", (req, res) => {
   res.header("Content-Type", "application/xml");
   res.send(`<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url><loc>https://www.alphaapkstore.xyz/</loc><priority>1.0</priority></url>
-  <url><loc>https://www.alphaapkstore.xyz/about</loc><priority>0.8</priority></url>
-  <url><loc>https://www.alphaapkstore.xyz/contact</loc><priority>0.8</priority></url>
-  <url><loc>https://www.alphaapkstore.xyz/privacy-policy</loc><priority>0.7</priority></url>
-  <url><loc>https://www.alphaapkstore.xyz/terms</loc><priority>0.7</priority></url>
+  <url><loc>https://alphaapkstore.xyz/</loc><priority>1.0</priority></url>
+  <url><loc>https://alphaapkstore.xyz/about</loc><priority>0.8</priority></url>
+  <url><loc>https://alphaapkstore.xyz/contact</loc><priority>0.8</priority></url>
+  <url><loc>https://alphaapkstore.xyz/privacy-policy</loc><priority>0.7</priority></url>
+  <url><loc>https://alphaapkstore.xyz/terms</loc><priority>0.7</priority></url>
 </urlset>`);
 });
 
+// ====================================
 // SERVE FRONTEND BUILD
+// ====================================
 const buildPath = path.join(__dirname, "../frontend/build");
 
 app.use(express.static(buildPath));
 
-app.get(/.*/, (req, res) => {
+app.get("*", (req, res) => {
   res.sendFile(path.join(buildPath, "index.html"));
 });
 
+// ====================================
 // START SERVER
+// ====================================
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {

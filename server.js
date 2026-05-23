@@ -16,14 +16,18 @@ const app = express();
 app.set("trust proxy", true);
 
 app.use((req, res, next) => {
-  const host = req.headers.host;
+  const host = req.headers.host || "";
   const proto = req.headers["x-forwarded-proto"] || req.protocol;
   const canonicalHost = "www.alphaapkstore.xyz";
 
+  const isRenderBackend = host.includes("onrender.com");
+  const isLocalhost = host.includes("localhost") || host.includes("127.0.0.1");
+  const isApiRequest = req.originalUrl.startsWith("/api");
+
   if (
-    host &&
-    !host.includes("localhost") &&
-    !host.includes("127.0.0.1") &&
+    !isRenderBackend &&
+    !isLocalhost &&
+    !isApiRequest &&
     (host !== canonicalHost || proto !== "https")
   ) {
     return res.redirect(301, `https://${canonicalHost}${req.originalUrl}`);
@@ -31,7 +35,6 @@ app.use((req, res, next) => {
 
   next();
 });
-
 // CORS
 app.use(
   cors({

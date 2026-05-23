@@ -12,34 +12,16 @@ const { createClient } = require("@supabase/supabase-js");
 
 const app = express();
 
-// SEO DOMAIN FIX
+// TRUST RENDER PROXY
 app.set("trust proxy", true);
 
-app.use((req, res, next) => {
-  const host = req.headers.host || "";
-  const proto = req.headers["x-forwarded-proto"] || req.protocol;
-  const canonicalHost = "www.alphaapkstore.xyz";
-
-  const isRenderBackend = host.includes("onrender.com");
-  const isLocalhost = host.includes("localhost") || host.includes("127.0.0.1");
-  const isApiRequest = req.originalUrl.startsWith("/api");
-
-  if (
-    !isRenderBackend &&
-    !isLocalhost &&
-    !isApiRequest &&
-    (host !== canonicalHost || proto !== "https")
-  ) {
-    return res.redirect(301, `https://${canonicalHost}${req.originalUrl}`);
-  }
-
-  next();
-});
-// CORS
+// CORS FIRST — IMPORTANT
 app.use(
   cors({
     origin: [
+      "https://alphaapkstore.xyz",
       "https://www.alphaapkstore.xyz",
+      "https://alpha-apk-backend.onrender.com",
       "http://localhost:3000",
     ],
     methods: ["GET", "POST", "DELETE", "OPTIONS"],
@@ -47,7 +29,29 @@ app.use(
   })
 );
 
+app.options("*", cors());
+
 app.use(express.json({ limit: "50mb" }));
+
+// REDIRECT ONLY WEBSITE DOMAINS, NOT RENDER API
+app.use((req, res, next) => {
+  const host = req.headers.host || "";
+  const proto = req.headers["x-forwarded-proto"] || req.protocol;
+
+  const canonicalHost = "www.alphaapkstore.xyz";
+
+  const isWebsiteDomain =
+    host === "alphaapkstore.xyz" || host === "www.alphaapkstore.xyz";
+
+  if (
+    isWebsiteDomain &&
+    (host !== canonicalHost || proto !== "https")
+  ) {
+    return res.redirect(301, `https://${canonicalHost}${req.originalUrl}`);
+  }
+
+  next();
+});
 
 // SUPABASE
 const supabase = createClient(
@@ -65,6 +69,11 @@ function makeSlug(text) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
 }
+
+// HEALTH CHECK
+app.get("/api/health", (req, res) => {
+  res.json({ success: true, message: "Backend working" });
+});
 
 // ADMIN AUTH
 app.post("/api/admin-auth", (req, res) => {
@@ -192,10 +201,7 @@ app.delete("/api/delete-apk/:id", async (req, res) => {
       });
     }
 
-    const { error } = await supabase
-      .from(TABLE)
-      .delete()
-      .eq("id", id);
+    const { error } = await supabase.from(TABLE).delete().eq("id", id);
 
     if (error) {
       console.log("DELETE ERROR:", error);
@@ -240,7 +246,7 @@ const buildPath = path.join(__dirname, "../frontend/build");
 
 app.use(express.static(buildPath));
 
-app.get("*", (req, res) => {
+app.get(/.*/, (req, res) => {
   res.sendFile(path.join(buildPath, "index.html"));
 });
 

@@ -18,7 +18,6 @@ const app = express();
 app.use(
   cors({
     origin: [
-      "https://alphaapkstore.xyz",
       "https://www.alphaapkstore.xyz",
       "http://localhost:3000",
     ],

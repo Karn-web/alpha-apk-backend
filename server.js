@@ -17,10 +17,13 @@ const app = express();
 // ====================================
 app.use(
   cors({
-    origin: [
-      "https://www.alphaapkstore.xyz",
-      "http://localhost:3000",
-    ],
+   origin: [
+  "https://www.alphaapkstore.xyz",
+  "https://alphaapkstore.xyz",
+  "https://www.alphaapkstore.com",
+  "https://alphaapkstore.com",
+  "http://localhost:3000",
+],
     methods: ["GET", "POST", "DELETE", "OPTIONS"],
     credentials: true,
   })
@@ -165,16 +168,22 @@ app.post("/api/upload-apk", requireAdmin, async (req, res) => {
 // GET ALL APKS
 // ====================================
 app.options("/api/apks", (req, res) => {
-  res.setHeader("Access-Control-Allow-Origin", "https://www.alphaapkstore.xyz");
+  res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization"
+  );
   return res.sendStatus(200);
 });
 
 app.get("/api/apks", async (req, res) => {
-  res.setHeader("Access-Control-Allow-Origin", "https://www.alphaapkstore.xyz");
+  res.setHeader("Access-Control-Allow-Origin", req.headers.origin || "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization"
+  );
 
   try {
     const { data, error } = await supabase

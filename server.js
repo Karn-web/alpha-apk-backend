@@ -41,29 +41,20 @@ const TABLE = "apks";
 // ====================================
 // ADMIN SECURITY CODE
 // ====================================
-const ADMIN_CODE = "GURJANTSANDHU";
+const ADMIN_SECRET = "ALPHA_SECURE_2026_X9K47";
 
-app.post("/api/admin-auth", (req, res) => {
-  try {
-    const { code } = req.body;
+function requireAdmin(req, res, next) {
+  const secret = req.headers["x-admin-secret"];
 
-    if (code === ADMIN_CODE) {
-      return res.json({ success: true });
-    }
-
-    return res.status(401).json({
+  if (secret !== ADMIN_SECRET) {
+    return res.status(403).json({
       success: false,
-      message: "Invalid security code",
-    });
-  } catch (error) {
-    console.log("ADMIN AUTH ERROR:", error);
-    return res.status(500).json({
-      success: false,
-      error: "Server error",
+      error: "Forbidden",
     });
   }
-});
 
+  next();
+}
 // ====================================
 // SLUG MAKER
 // ====================================
@@ -78,7 +69,7 @@ function makeSlug(text) {
 // ====================================
 // UPLOAD APK
 // ====================================
-app.post("/api/upload-apk", async (req, res) => {
+app.post("/api/upload-apk", requireAdmin, async (req, res) => {
   try {
     const {
       name,
@@ -184,7 +175,7 @@ app.get("/api/apks", async (req, res) => {
 // ====================================
 // DELETE APK
 // ====================================
-app.delete("/api/delete-apk/:id", async (req, res) => {
+app.delete("/api/delete-apk/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
 

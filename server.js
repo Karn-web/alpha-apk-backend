@@ -55,6 +55,33 @@ function requireAdmin(req, res, next) {
 
   next();
 }
+app.post("/api/admin-auth", (req, res) => {
+  try {
+    const { code } = req.body;
+
+    if (code === ADMIN_SECRET) {
+      return res.json({ success: true });
+    }
+
+    return res.status(401).json({
+      success: false,
+      message: "Invalid security code",
+    });
+  } catch (error) {
+    console.log("ADMIN AUTH ERROR:", error);
+    return res.status(500).json({
+      success: false,
+      error: "Server error",
+    });
+  }
+});
+
+app.get("/api/admin-auth-test", (req, res) => {
+  res.json({
+    success: true,
+    message: "Admin auth route working",
+  });
+});
 // ====================================
 // SLUG MAKER
 // ====================================

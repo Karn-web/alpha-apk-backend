@@ -17,6 +17,9 @@ const Razorpay = require("razorpay");
 
 const app = express();
 
+// Render/proxy fix for express-rate-limit behind hosted proxies
+app.set("trust proxy", 1);
+
 // ====================================
 // SECURITY & PERFORMANCE
 // ====================================
@@ -131,19 +134,22 @@ const PREMIUM_PLANS = {
   bronze: {
     name: "Bronze",
     inrAmount: 17000, // ₹170.00 in paise
-    usdAmount: "1.99",
+    usdAmount: "1.99", // normal display price
+    usdMinorAmount: 199, // $1.99 in cents/minor unit for Razorpay USD orders
     days: 30,
   },
   silver: {
     name: "Silver",
     inrAmount: 43000, // ₹430.00 in paise
-    usdAmount: "4.99",
+    usdAmount: "4.99", // normal display price
+    usdMinorAmount: 499, // $4.99 in cents/minor unit for Razorpay USD orders
     days: 30,
   },
   diamond: {
     name: "Diamond",
     inrAmount: 86000, // ₹860.00 in paise
-    usdAmount: "9.99",
+    usdAmount: "9.99", // normal display price
+    usdMinorAmount: 999, // $9.99 in cents/minor unit for Razorpay USD orders
     days: 30,
   },
 };
@@ -253,7 +259,7 @@ async function savePaymentRecord(record) {
   }
 }
 
-async function activatePremiumForUser({ user, plan, provider, providerPaymentId, providerOrderId }) {
+async function activatePremiumForUser({ user, plan, provider, providerPaymentId, providerOrderId, providerCurrency }) {
   const selectedPlan = PREMIUM_PLANS[plan];
   const now = new Date();
   const subscriptionEnd = addDays(now, selectedPlan.days);
@@ -291,8 +297,13 @@ async function activatePremiumForUser({ user, plan, provider, providerPaymentId,
     provider_order_id: providerOrderId || null,
     provider_payment_id: providerPaymentId || null,
     amount_inr:
-      provider === "razorpay" ? Number((selectedPlan.inrAmount / 100).toFixed(2)) : null,
-    amount_usd: provider === "paypal" ? selectedPlan.usdAmount : null,
+      provider === "razorpay" && providerCurrency === "INR"
+        ? Number((selectedPlan.inrAmount / 100).toFixed(2))
+        : null,
+    amount_usd:
+      provider === "paypal" || providerCurrency === "USD"
+        ? selectedPlan.usdAmount
+        : null,
     status: "success",
     created_at: now.toISOString(),
   });
@@ -344,7 +355,10 @@ app.get("/api/premium-plans", (req, res) => {
   });
 });
 
-// Razorpay order creation for Indian users: UPI / cards / netbanking.
+// Razorpay order creation.
+// paymentCurrency:
+// - "inr" = Indian checkout with UPI/cards/netbanking
+// - "usd" = International checkout; Razorpay can show PayPal only for non-INR currencies
 app.post("/api/create-premium-order", requireUser, async (req, res) => {
   try {
     if (!razorpay) {
@@ -361,13 +375,25 @@ app.post("/api/create-premium-order", requireUser, async (req, res) => {
     }
 
     const selectedPlan = PREMIUM_PLANS[plan];
+    const paymentCurrency = String(req.body.paymentCurrency || "inr").toLowerCase();
+
+    let amount = selectedPlan.inrAmount;
+    let currency = "INR";
+    let displayAmount = `₹${(selectedPlan.inrAmount / 100).toFixed(0)}`;
+
+    if (paymentCurrency === "usd") {
+      amount = selectedPlan.usdMinorAmount;
+      currency = "USD";
+      displayAmount = `$${selectedPlan.usdAmount}`;
+    }
 
     const order = await razorpay.orders.create({
-      amount: selectedPlan.inrAmount,
-      currency: "INR",
-      receipt: `alph_${plan}_${Date.now()}`,
+      amount,
+      currency,
+      receipt: `alph_${plan}_${currency.toLowerCase()}_${Date.now()}`,
       notes: {
         plan,
+        currency,
         user_id: req.user.id,
         email: req.user.email || "",
         product: "ALPH Premium",
@@ -381,8 +407,10 @@ app.post("/api/create-premium-order", requireUser, async (req, res) => {
       orderId: order.id,
       amount: order.amount,
       currency: order.currency,
+      displayAmount,
       plan,
       planName: selectedPlan.name,
+      paymentCurrency,
       user: {
         id: req.user.id,
         email: req.user.email,
@@ -402,6 +430,7 @@ app.post("/api/verify-premium-payment", requireUser, async (req, res) => {
       razorpay_order_id,
       razorpay_payment_id,
       razorpay_signature,
+      currency: rawCurrency,
     } = req.body;
 
     const plan = getValidPlan(rawPlan);
@@ -429,6 +458,7 @@ app.post("/api/verify-premium-payment", requireUser, async (req, res) => {
       provider: "razorpay",
       providerOrderId: razorpay_order_id,
       providerPaymentId: razorpay_payment_id,
+      providerCurrency: String(rawCurrency || "INR").toUpperCase(),
     });
 
     return res.json({
@@ -532,6 +562,7 @@ app.post("/api/capture-paypal-order", requireUser, async (req, res) => {
       provider: "paypal",
       providerOrderId: orderId,
       providerPaymentId: captureId,
+      providerCurrency: "USD",
     });
 
     return res.json({
@@ -752,13 +783,23 @@ ${allUrls
 });
 
 // ====================================
-// SERVE FRONTEND BUILD
+// SERVE FRONTEND BUILD (optional)
+// Your frontend is usually hosted separately on Cloudflare.
+// This safe fallback prevents Render backend ENOENT crashes/log spam.
 // ====================================
 const buildPath = path.join(__dirname, "../frontend/build");
 app.use(express.static(buildPath));
 
 app.get("*", (req, res) => {
-  res.sendFile(path.join(buildPath, "index.html"));
+  const indexPath = path.join(buildPath, "index.html");
+  res.sendFile(indexPath, (err) => {
+    if (err) {
+      return res.status(404).json({
+        success: false,
+        message: "ALPH backend is running. Frontend build not found on this service.",
+      });
+    }
+  });
 });
 
 // ====================================
